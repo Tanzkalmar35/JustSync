@@ -1,20 +1,34 @@
 package api
 
 import (
+	"JustSync/entities"
 	"JustSync/service"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 )
 
+// Accepts json data
 func setup(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Setup request recieved")
 
-	err := service.HandleCreateSnapshot("")
+	var body entities.SyncRequest
+	err := json.NewDecoder(r.Body).Decode(&body)
 
 	if err != nil {
-		panic(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+
+	err = service.HandleCreateSnapshot(body.Path)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	fmt.Println("Setup request accepted")
 }
 
 func HandleRequests() {
