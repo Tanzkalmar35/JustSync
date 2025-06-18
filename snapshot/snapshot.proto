@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package snapshot;
+option go_package = "./snapshot";
+
+message FileChunks {
+  bytes whole_hash = 1;          // 32-byte BLAKE3 hash
+  repeated bytes chunk_hashes = 2; // 32-byte chunk hashes
+}
+
+message ProjectSnapshot {
+  string version = 1;            // Format version
+  int64 timestamp = 2;           // Unix nanoseconds
+  map<string, FileChunks> files = 3; // path → file metadata
+}
