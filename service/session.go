@@ -1,10 +1,22 @@
 package service
 
-import "JustSync/utils"
+import (
+	"JustSync/snapshot"
+	"JustSync/utils"
+	"log/slog"
+)
 
 func HandleCreateSnapshot(path string) error {
-	utils.ProcessDir(path)
-	// 1. Compress files
-	// 2. Store compressed snapshot
+	snappath := "snapshot/SNAPSHOT.sync.snap"
+
+	snap, err := utils.ProcessDir(path)
+
+	if err != nil {
+		return err
+	}
+
+	snapshot.WriteSnapshot(snap, snappath)
+
+	slog.Info("Created new snapshot at " + snappath)
 	return nil
 }

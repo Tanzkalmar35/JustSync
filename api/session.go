@@ -4,20 +4,20 @@ import (
 	"JustSync/entities"
 	"JustSync/service"
 	"encoding/json"
-	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
 // Accepts json data
 func setup(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Setup request recieved")
+	slog.Info("Setup requested")
 
 	var body entities.SyncRequest
 	err := json.NewDecoder(r.Body).Decode(&body)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		slog.Error("Invalid json body data given")
 		return
 	}
 
@@ -28,10 +28,12 @@ func setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("Setup request accepted")
+	slog.Info("Setup successful")
 }
 
 func HandleRequests() {
 	http.HandleFunc("/setup", setup)
-	log.Fatal(http.ListenAndServe(":10000", nil))
+	if err := http.ListenAndServe(":10000", nil); err != nil {
+		slog.Error(err.Error())
+	}
 }

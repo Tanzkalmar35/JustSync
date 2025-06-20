@@ -2,26 +2,37 @@ package utils
 
 import (
 	"JustSync/snapshot"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
-	"google.golang.org/protobuf/proto"
+	"github.com/zeebo/blake3"
 )
 
-func ProcessDir(root string) error {
-	if info, err := os.Stat(root); err != nil {
-		return fmt.Errorf("Invalid path: %w", err)
-	} else if !info.IsDir() {
-		return errors.New("Path does not point to a directory")
+const (
+	ChunkSize = 4 * 1024 // 4096 bytes (4kb)
+)
+
+func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
+
+	snap := &snapshot.ProjectSnapshot{
+		Version:   "1.0",
+		Timestamp: time.Now().UnixNano(),
+		Files:     map[string]*snapshot.FileChunks{},
 	}
 
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		// Handle directory traversal errors
+	if info, err := os.Stat(root); err != nil {
+		return snap, fmt.Errorf("Invalid path: %w", err)
+	} else if !info.IsDir() {
+		return snap, errors.New("Path does not point to a directory")
+	}
+
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("access error at %s: %w", path, err)
 		}
@@ -31,74 +42,74 @@ func ProcessDir(root string) error {
 			return nil
 		}
 
-		// Process file (replace this with your actual logic)
-		if err := processFile(path); err != nil {
+		filesnap, e := processFile(path)
+
+		if e != nil {
 			// Handle but don't abort on file processing errors
 			return fmt.Errorf("processing error: %v\n", err)
 		}
 
+		snap.Files[path] = &filesnap
+
 		return nil
-	})
+	}); err != nil {
+		return snap, err
+	}
+
+	return snap, nil
 }
 
-func processFile(path string) error {
-	content, err := os.ReadFile(path)
+func processFile(path string) (snapshot.FileChunks, error) {
+	snap := snapshot.FileChunks{
+		WholeHash:   []byte{},
+		ChunkHashes: [][]byte{},
+	}
+
+	// PERF: Consider streaming file content instead of loading full content into memory. However for now, as we are mostly working with <1mb files, this is still fine
+	filecontent, err := os.ReadFile(path)
 
 	if err != nil {
-		return err
+		return snap, err
 	}
 
-	fmt.Printf("\n═════ File: %s ═════\n", path)
-	fmt.Println(string(content))
-	fmt.Println("═══════════════════════════════════════════════")
+	// Hash whole content
+	snap.WholeHash = createBlake3Hash(filecontent)
 
-	return nil
-}
+	// Split into chunks and hash these
+	// PERF: Implement smart chunking based on file size instead of fixed size
+	chunkHashes, err := chunkFileContentFixedSize(filecontent)
 
-func CreateSnapshot() *snapshot.ProjectSnapshot {
-	return &snapshot.ProjectSnapshot{
-		Version:   "1.0",
-		Timestamp: time.Now().UnixNano(),
-		Files: map[string]*snapshot.FileChunks{
-			"src/main.go": {
-				WholeHash:   randomBytes(32), // Replace with real BLAKE3
-				ChunkHashes: [][]byte{randomBytes(32), randomBytes(32)},
-			},
-		},
-	}
-}
-
-// Write snapshot to file (optimized)
-func WriteSnapshot(snap *snapshot.ProjectSnapshot, path string) error {
-	// Proto encoding (3-5x faster than JSON)
-	data, err := proto.Marshal(snap)
 	if err != nil {
-		return err
+		return snap, err
 	}
 
-	// Optional compression (zstd reduces 60-70%)
-	// compressed := zstd.Compress(nil, data)
+	snap.ChunkHashes = chunkHashes
 
-	return os.WriteFile(path, data, 0644)
-}
+	slog.Debug(strconv.Itoa(len(snap.ChunkHashes)))
 
-// Read snapshot from file (high-performance)
-func ReadSnapshot(path string) (*snapshot.ProjectSnapshot, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+	for i, hashes := range snap.ChunkHashes {
+		slog.Debug("Hahes " + string(rune(i)) + " holds: " + string(hashes))
 	}
 
-	// Optional decompression
-	// data = zstd.Decompress(nil, data)
-
-	snap := &snapshot.ProjectSnapshot{}
-	return snap, proto.Unmarshal(data, snap)
+	return snap, nil
 }
 
-// Helper for demo (replace with real hashing)
-func randomBytes(n int) []byte {
-	b := make([]byte, n)
-	rand.Read(b)
-	return b
+func chunkFileContentFixedSize(filecontent []byte) ([][]byte, error) {
+	var chunkHashes [][]byte
+
+	for offset := 0; offset < len(filecontent); offset += ChunkSize {
+		end := min(offset+ChunkSize, len(filecontent))
+
+		chunk := filecontent[offset:end]
+		slog.Debug("Processing chunk: " + string(chunk))
+		chunkHashes = append(chunkHashes, createBlake3Hash(chunk))
+	}
+
+	return chunkHashes, nil
+}
+
+func createBlake3Hash(data []byte) []byte {
+	hasher := blake3.New()
+	hasher.Write(data)
+	return hasher.Sum(nil)
 }
