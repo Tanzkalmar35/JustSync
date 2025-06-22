@@ -12,7 +12,7 @@ import (
 func setup(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Setup requested")
 
-	var body entities.SyncRequest
+	var body entities.PathRequest
 	err := json.NewDecoder(r.Body).Decode(&body)
 
 	if err != nil {
