@@ -73,7 +73,7 @@ func processFile(path string) (snapshot.FileChunks, error) {
 	}
 
 	// Hash whole content
-	snap.WholeHash = createBlake3Hash(filecontent)
+	snap.WholeHash = CreateBlake3Hash(filecontent)
 
 	// Split into chunks and hash these
 	// PERF: Implement smart chunking based on file size instead of fixed size
@@ -102,13 +102,13 @@ func chunkFileContentFixedSize(filecontent []byte) ([][]byte, error) {
 
 		chunk := filecontent[offset:end]
 		slog.Debug("Processing chunk: " + string(chunk))
-		chunkHashes = append(chunkHashes, createBlake3Hash(chunk))
+		chunkHashes = append(chunkHashes, CreateBlake3Hash(chunk))
 	}
 
 	return chunkHashes, nil
 }
 
-func createBlake3Hash(data []byte) []byte {
+func CreateBlake3Hash(data []byte) []byte {
 	hasher := blake3.New()
 	hasher.Write(data)
 	return hasher.Sum(nil)

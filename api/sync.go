@@ -2,9 +2,14 @@ package api
 
 import (
 	"JustSync/entities"
+	"JustSync/service"
+	"JustSync/snapshot"
+	"JustSync/utils"
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 )
 
 func requestSync(w http.ResponseWriter, r *http.Request) {
@@ -17,8 +22,29 @@ func requestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Get file on path
-	// TODO: Hash that file content
-	// TODO: compare to state
-	// TODO: If change detected, start a sync request to all clients
+	// PERF: Consider streaming file content instead of loading full content into memory. However for now, as we are mostly working with <1mb files, this is still fine
+	content, err := os.ReadFile(body.Path)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		slog.Error("Could not read file data: " + err.Error())
+		return
+	}
+
+	hash := utils.CreateBlake3Hash(content)
+	snap, err := snapshot.ReadSnapshot("snapshot/SNAPSHOT.sync.snap")
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		slog.Error("Snapshot not found or corrupted, maybe restart the session? " + err.Error())
+		return
+	}
+
+	if bytes.Compare(hash, snap.Files[body.Path].WholeHash) == 0 {
+		slog.Info("Sync request rejected, no change in file detected.")
+		return
+	}
+
+	// TODO: start a sync request to all clients
+	service.SyncAllClients(content, hash)
 }
