@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-func requestSync(w http.ResponseWriter, r *http.Request) {
+func RequestSync(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Sync requested")
 
 	var body entities.PathRequest
@@ -35,16 +35,16 @@ func requestSync(w http.ResponseWriter, r *http.Request) {
 	snap, err := snapshot.ReadSnapshot("snapshot/SNAPSHOT.sync.snap")
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusNotAcceptable)
 		slog.Error("Snapshot not found or corrupted, maybe restart the session? " + err.Error())
 		return
 	}
 
-	if bytes.Compare(hash, snap.Files[body.Path].WholeHash) == 0 {
+	if bytes.Equal(hash, snap.Files[body.Path].WholeHash) {
 		slog.Info("Sync request rejected, no change in file detected.")
 		return
 	}
 
-	// TODO: start a sync request to all clients
 	service.SyncAllClients(content, hash)
+	w.WriteHeader(http.StatusOK)
 }

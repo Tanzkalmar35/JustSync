@@ -9,7 +9,7 @@ import (
 )
 
 // Accepts json data
-func setup(w http.ResponseWriter, r *http.Request) {
+func Setup(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Setup requested")
 
 	var body entities.PathRequest
@@ -25,15 +25,10 @@ func setup(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		slog.Error("Could not create snapshot, probably an invalid path")
 		return
 	}
 
 	slog.Info("Setup successful")
-}
-
-func HandleRequests() {
-	http.HandleFunc("/setup", setup)
-	if err := http.ListenAndServe(":10000", nil); err != nil {
-		slog.Error(err.Error())
-	}
+	w.WriteHeader(http.StatusOK)
 }
