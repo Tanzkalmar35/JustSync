@@ -32,3 +32,12 @@ func Setup(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Setup successful")
 	w.WriteHeader(http.StatusOK)
 }
+
+func ConnectClient(w http.ResponseWriter, r *http.Request) {
+	slog.Info("Client connection request received")
+
+	// PERF: Consider switching to websockets later on for truly real time data
+	// TODO: Establish connection using SSE (Server-Sent Events)
+
+	slog.Info("Client connected")
+}
