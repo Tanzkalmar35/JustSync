@@ -13,30 +13,42 @@ import (
 )
 
 func main() {
-	fmt.Println("Hello, World!")
+	var mode utils.RunMode = utils.ServerMode
 
-	// Logger initialization
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // Set global level
-	}))
-	slog.SetDefault(logger)
+	// Logger initialization - Set debug mode
+	utils.SetLevel(utils.LevelInfo)
 
-	adminMode := flag.Bool("admin", false, "Run in admin console mode")
+	// Capture run mode from cmd line args
+	flag.Var(&mode, "mode", "Run mode: server, client, admin")
 	flag.Parse()
 
-	if *adminMode {
+	// Set global runtime mode
+	utils.SetMode(mode)
+
+	utils.LogInfo("Starting application in %s mode", mode.String())
+	utils.LogDebug("Debug log")
+
+	// Start logic loop
+	switch mode {
+	case utils.ServerMode:
+		runServerMode()
+	case utils.ClientMode:
+		runClientMode()
+	case utils.AdminMode:
 		runAdminMode()
-	} else {
-		handleRequests()
 	}
 }
 
-func handleRequests() {
+func runServerMode() {
 	http.HandleFunc("/setup", api.Setup)
 	http.HandleFunc("/send-sync", api.RequestSync)
 	if err := http.ListenAndServe(":10000", nil); err != nil {
 		slog.Error(err.Error())
 	}
+}
+
+func runClientMode() {
+	//TODO:
 }
 
 func runAdminMode() {
