@@ -14,6 +14,11 @@ const (
 	TokenExpiration = 24 * time.Hour
 )
 
+var (
+	instance *TokenManager
+	once     sync.Once
+)
+
 type TokenManager struct {
 	otps       map[string]time.Time // OTP -> expiration
 	tokens     map[string]time.Time // token -> expiration
@@ -26,6 +31,17 @@ func NewTokenManager() *TokenManager {
 		otps:   make(map[string]time.Time),
 		tokens: make(map[string]time.Time),
 	}
+}
+
+func GetTokenManager() *TokenManager {
+	once.Do(func() {
+		instance = &TokenManager{
+			otps:   make(map[string]time.Time),
+			tokens: make(map[string]time.Time),
+		}
+		go instance.CleanUpReguarly()
+	})
+	return instance
 }
 
 func (m *TokenManager) GenerateOtp() string {
@@ -81,4 +97,28 @@ func (m *TokenManager) ValidateToken(token string) bool {
 	delete(m.tokens, token)
 
 	return time.Now().Before(expiration)
+}
+
+func (m *TokenManager) CleanUpReguarly() {
+	ticker := time.NewTicker(10 * time.Minute)
+	for range ticker.C {
+		// Cleanup all expired otps and tokens
+		now := time.Now()
+
+		m.otpsMutex.Lock()
+		for otp, exp := range m.otps {
+			if now.After(exp) {
+				delete(m.otps, otp)
+			}
+		}
+		m.otpsMutex.Unlock()
+
+		m.tokenMutex.Lock()
+		for token, exp := range m.tokens {
+			if now.After(exp) {
+				delete(m.tokens, token)
+			}
+		}
+		m.tokenMutex.Unlock()
+	}
 }

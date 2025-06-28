@@ -1,8 +1,8 @@
 package api
 
 import (
-	"JustSync/entities"
 	"JustSync/service"
+	"JustSync/utils"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -12,8 +12,8 @@ import (
 func Setup(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Setup requested")
 
-	var body entities.PathRequest
-	err := json.NewDecoder(r.Body).Decode(&body)
+	var req struct{ path string }
+	err := json.NewDecoder(r.Body).Decode(&req)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -21,7 +21,7 @@ func Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = service.HandleCreateSnapshot(body.Path)
+	err = service.HandleCreateSnapshot(req.path)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -33,11 +33,29 @@ func Setup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func ConnectClient(w http.ResponseWriter, r *http.Request) {
+// PERF: Consider switching to websockets later on for truly real time data
+func AuthenticateClient(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Client connection request received")
 
-	// PERF: Consider switching to websockets later on for truly real time data
-	// TODO: Establish connection using SSE (Server-Sent Events)
+	var req struct{ otp string }
+
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		slog.Error("Invalid json body data given")
+		return
+	}
+
+	if !utils.GetTokenManager().ValidateOtp(req.otp) {
+		msg := "Given one time password could not be validated. Remember these invalidate after 10mins"
+		http.Error(w, msg, http.StatusForbidden)
+		slog.Error(msg)
+		return
+	}
+
+	resp := "token='" + utils.GetTokenManager().GenerateToken() + "'"
+	w.Write([]byte(resp))
 
 	slog.Info("Client connected")
+	w.WriteHeader(http.StatusAccepted)
 }

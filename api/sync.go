@@ -1,7 +1,6 @@
 package api
 
 import (
-	"JustSync/entities"
 	"JustSync/service"
 	"JustSync/snapshot"
 	"JustSync/utils"
@@ -15,7 +14,7 @@ import (
 func RequestSync(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Sync requested")
 
-	var body entities.PathRequest
+	var body struct{ path string }
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		slog.Error("Invalid json body data provided")
@@ -23,7 +22,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// PERF: Consider streaming file content instead of loading full content into memory. However for now, as we are mostly working with <1mb files, this is still fine
-	content, err := os.ReadFile(body.Path)
+	content, err := os.ReadFile(body.path)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -40,7 +39,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if bytes.Equal(hash, snap.Files[body.Path].WholeHash) {
+	if bytes.Equal(hash, snap.Files[body.path].WholeHash) {
 		slog.Info("Sync request rejected, no change in file detected.")
 		return
 	}
