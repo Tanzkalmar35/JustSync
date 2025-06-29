@@ -4,9 +4,9 @@ import (
 	"JustSync/api"
 	"JustSync/utils"
 	"bufio"
-	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -72,19 +72,21 @@ func runAdminMode() {
 
 		switch input {
 		case "new-otp":
-			var otpReq struct{ otp string }
-
-			req, err := http.Get("localhost:10000/admin/generateOtp?t=SECRETKEY")
+			resp, err := http.Get("http://localhost:10000/admin/generateOtp?t=SECRETKEY")
 			if err != nil {
 				utils.LogError("Error retrieving otp, is the server running?")
+				os.Exit(0)
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				utils.LogError("Something went wrong while generating otp: %s", err.Error())
+				os.Exit(0)
 			}
 
-			if err := json.NewDecoder(req.Body).Decode(&otpReq); err != nil {
-				utils.LogError("Error retrieving otp: %s", err.Error())
-			}
-
-			utils.LogInfo("Generated otp: %s\n", otpReq.otp)
-			utils.LogInfo("Generated otp expires in %.0f minutes\n", utils.OtpExpiration.Minutes())
+			utils.LogInfo("Generated otp: %s", string(body))
+			utils.LogInfo("Generated otp expires in %.0f minutes", utils.OtpExpiration.Minutes())
 		case "exit":
 			os.Exit(0)
 		default:

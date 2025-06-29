@@ -41,7 +41,7 @@ func SetOutput(w io.Writer) {
 	output = w
 }
 
-func log(level LogLevel, format string, args ...interface{}) {
+func log(level LogLevel, color, format string, args ...any) {
 	if level < logLevel {
 		return
 	}
@@ -54,9 +54,10 @@ func log(level LogLevel, format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 
 	logEntry := fmt.Sprintf(
-		"[%s] [%s] [%s] %s\n",
+		"[%s] [%s] %s [%s] \033[0m %s\n",
 		timestamp,
 		GetMode().String(),
+		color,
 		levelName,
 		message,
 	)
@@ -65,18 +66,18 @@ func log(level LogLevel, format string, args ...interface{}) {
 }
 
 // Convenience methods
-func LogDebug(format string, args ...interface{}) {
-	log(LevelDebug, format, args...)
+func LogDebug(format string, args ...any) {
+	log(LevelDebug, "\033[32m", format, args...)
 }
 
-func LogInfo(format string, args ...interface{}) {
-	log(LevelInfo, format, args...)
+func LogInfo(format string, args ...any) {
+	log(LevelInfo, "\033[34m", format, args...)
 }
 
-func LogWarn(format string, args ...interface{}) {
-	log(LevelWarn, format, args...)
+func LogWarn(format string, args ...any) {
+	log(LevelWarn, "\033[33m", format, args...)
 }
 
-func LogError(format string, args ...interface{}) {
-	log(LevelError, format, args...)
+func LogError(format string, args ...any) {
+	log(LevelError, "\033[31m", format, args...)
 }
