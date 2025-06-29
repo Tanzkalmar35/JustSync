@@ -4,9 +4,9 @@ import (
 	"JustSync/api"
 	"JustSync/utils"
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -26,7 +26,6 @@ func main() {
 	utils.SetMode(mode)
 
 	utils.LogInfo("Starting application in %s mode", mode.String())
-	utils.LogDebug("Debug log")
 
 	// Start logic loop
 	switch mode {
@@ -40,22 +39,30 @@ func main() {
 }
 
 func runServerMode() {
+	port := ":10000"
+	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
+
 	http.HandleFunc("/setup", api.Setup)
 	http.HandleFunc("/send-sync", api.RequestSync)
-	if err := http.ListenAndServe(":10000", nil); err != nil {
-		slog.Error(err.Error())
+	http.HandleFunc("/authenticate", api.AuthenticateClient)
+	http.HandleFunc("/admin/generateOtp", api.HandleGenerateOtp)
+
+	utils.LogInfo("Server running at port %s", port)
+
+	if err := http.ListenAndServe(port, nil); err != nil {
+		utils.LogError(err.Error())
 	}
 }
 
 func runClientMode() {
-	//TODO:
+	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
+	// TODO:
 }
 
 func runAdminMode() {
-	slog.Info("Admin console")
-	slog.Info("Commands: new-otp, exit")
+	utils.LogInfo("Admin console")
+	utils.LogInfo("Commands: new-otp, exit")
 
-	tm := utils.NewTokenManager()
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
@@ -65,13 +72,23 @@ func runAdminMode() {
 
 		switch input {
 		case "new-otp":
-			otp := tm.GenerateOtp()
-			slog.Info("Generated otp: %s\n", otp)
-			slog.Info("Generated otp expires in %.0f minutes\n", utils.OtpExpiration.Minutes())
+			var otpReq struct{ otp string }
+
+			req, err := http.Get("localhost:10000/admin/generateOtp?t=SECRETKEY")
+			if err != nil {
+				utils.LogError("Error retrieving otp, is the server running?")
+			}
+
+			if err := json.NewDecoder(req.Body).Decode(&otpReq); err != nil {
+				utils.LogError("Error retrieving otp: %s", err.Error())
+			}
+
+			utils.LogInfo("Generated otp: %s\n", otpReq.otp)
+			utils.LogInfo("Generated otp expires in %.0f minutes\n", utils.OtpExpiration.Minutes())
 		case "exit":
 			os.Exit(0)
 		default:
-			slog.Error("Unknown command.")
+			utils.LogError("Unknown command.")
 		}
 	}
 }

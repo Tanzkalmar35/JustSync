@@ -77,6 +77,6 @@ func LogWarn(format string, args ...interface{}) {
 	log(LevelWarn, format, args...)
 }
 
-func Error(format string, args ...interface{}) {
+func LogError(format string, args ...interface{}) {
 	log(LevelError, format, args...)
 }

@@ -6,18 +6,17 @@ import (
 	"JustSync/utils"
 	"bytes"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"os"
 )
 
 func RequestSync(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Sync requested")
+	utils.LogInfo("Sync requested")
 
 	var body struct{ path string }
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		slog.Error("Invalid json body data provided")
+		utils.LogError("Invalid json body data provided")
 		return
 	}
 
@@ -26,7 +25,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		slog.Error("Could not read file data: " + err.Error())
+		utils.LogError("Could not read file data: " + err.Error())
 		return
 	}
 
@@ -35,12 +34,12 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotAcceptable)
-		slog.Error("Snapshot not found or corrupted, maybe restart the session? " + err.Error())
+		utils.LogError("Snapshot not found or corrupted, maybe restart the session? " + err.Error())
 		return
 	}
 
 	if bytes.Equal(hash, snap.Files[body.path].WholeHash) {
-		slog.Info("Sync request rejected, no change in file detected.")
+		utils.LogInfo("Sync request rejected, no change in file detected.")
 		return
 	}
 

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -85,10 +85,10 @@ func processFile(path string) (snapshot.FileChunks, error) {
 
 	snap.ChunkHashes = chunkHashes
 
-	slog.Debug(strconv.Itoa(len(snap.ChunkHashes)))
+	LogDebug(strconv.Itoa(len(snap.ChunkHashes)))
 
 	for i, hashes := range snap.ChunkHashes {
-		slog.Debug("Hahes " + string(rune(i)) + " holds: " + string(hashes))
+		LogDebug("Hahes %s holds: %s", string(rune(i)), string(hashes))
 	}
 
 	return snap, nil
@@ -101,7 +101,7 @@ func chunkFileContentFixedSize(filecontent []byte) ([][]byte, error) {
 		end := min(offset+ChunkSize, len(filecontent))
 
 		chunk := filecontent[offset:end]
-		slog.Debug("Processing chunk: " + string(chunk))
+		LogDebug("Processing chunk: %s", string(chunk))
 		chunkHashes = append(chunkHashes, CreateBlake3Hash(chunk))
 	}
 
@@ -112,4 +112,30 @@ func CreateBlake3Hash(data []byte) []byte {
 	hasher := blake3.New()
 	hasher.Write(data)
 	return hasher.Sum(nil)
+}
+
+func GetOsSpecificConfigPath() string {
+	switch runtime.GOOS {
+	case "windows": // Well... windows
+		return filepath.Join(os.Getenv("APPDATA"), "JustSync")
+	case "darwin": // Macos
+		return filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "JustSync")
+	default: // Linux, BSD, ...
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "JustSync")
+		}
+		return filepath.Join(os.Getenv("HOME"), ".config", "JustSync")
+	}
+}
+
+func CreateConfigFolderAt(path string) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			LogError("Config could not be initialized at %s due to %s", path, err.Error())
+		} else {
+			LogInfo("Created config at %s", path)
+		}
+	} else {
+		LogInfo("Config directory does already exist")
+	}
 }

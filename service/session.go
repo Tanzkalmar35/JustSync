@@ -3,7 +3,6 @@ package service
 import (
 	"JustSync/snapshot"
 	"JustSync/utils"
-	"log/slog"
 )
 
 func HandleCreateSnapshot(path string) error {
@@ -17,6 +16,6 @@ func HandleCreateSnapshot(path string) error {
 
 	snapshot.WriteSnapshot(snap, snappath)
 
-	slog.Info("Created new snapshot at " + snappath)
+	utils.LogInfo("Created new snapshot at: %s", snappath)
 	return nil
 }
