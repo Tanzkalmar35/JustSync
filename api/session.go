@@ -36,7 +36,7 @@ func Setup(w http.ResponseWriter, r *http.Request) {
 func AuthenticateClient(w http.ResponseWriter, r *http.Request) {
 	utils.LogInfo("Client connection request received")
 
-	var req struct{ otp string }
+	var req struct{ Otp, Hostname string }
 
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
@@ -45,16 +45,24 @@ func AuthenticateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !utils.GetTokenManager().ValidateOtp(req.otp) {
+	if !utils.GetTokenManager().ValidateOtp(req.Otp) {
 		msg := "Given one time password could not be validated. Remember these invalidate after 10mins"
 		http.Error(w, msg, http.StatusForbidden)
 		utils.LogError(msg)
 		return
 	}
 
-	resp := "token='" + utils.GetTokenManager().GenerateToken() + "'"
-	w.Write([]byte(resp))
+	sessionToken := utils.GetTokenManager().GenerateToken()
 
-	utils.LogInfo("Client connected")
-	w.WriteHeader(http.StatusAccepted)
+	type AUthResponse struct {
+		SessionToken string `json:"session_token"`
+	}
+
+	// Create http response containing the session token
+	response := AUthResponse{SessionToken: sessionToken}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+
+	utils.LogInfo("Client %s connected", req.Hostname)
 }

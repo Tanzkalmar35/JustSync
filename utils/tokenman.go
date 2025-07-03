@@ -26,13 +26,6 @@ type TokenManager struct {
 	tokenMutex sync.RWMutex
 }
 
-func NewTokenManager() *TokenManager {
-	return &TokenManager{
-		otps:   make(map[string]time.Time),
-		tokens: make(map[string]time.Time),
-	}
-}
-
 func GetTokenManager() *TokenManager {
 	once.Do(func() {
 		instance = &TokenManager{
