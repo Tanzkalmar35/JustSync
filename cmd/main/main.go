@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 func main() {
@@ -20,6 +22,7 @@ func main() {
 
 	// Capture run mode from cmd line args
 	flag.Var(&mode, "mode", "Run mode: server, client, admin")
+	hostUrl := flag.String("host", "", "The host url when running in client mode")
 	flag.Parse()
 
 	// Set global runtime mode
@@ -32,7 +35,7 @@ func main() {
 	case utils.ServerMode:
 		runServerMode()
 	case utils.ClientMode:
-		runClientMode()
+		runClientMode(*hostUrl)
 	case utils.AdminMode:
 		runAdminMode()
 	}
@@ -44,7 +47,7 @@ func runServerMode() {
 
 	http.HandleFunc("/setup", api.Setup)
 	http.HandleFunc("/send-sync", api.RequestSync)
-	http.HandleFunc("/authenticate", api.AuthenticateClient)
+	http.HandleFunc("/connect", api.HandleConnectClient)
 	http.HandleFunc("/admin/generateOtp", api.HandleGenerateOtp)
 
 	utils.LogInfo("Server running at port %s", port)
@@ -54,9 +57,15 @@ func runServerMode() {
 	}
 }
 
-func runClientMode() {
-	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
-	// TODO:
+func runClientMode(host string) {
+	host = "ws://" + host
+
+	conn, _, err := websocket.DefaultDialer.Dial(host, nil)
+	if err != nil {
+		utils.LogError("Could not dial %s due to error: %s", host, err.Error())
+	}
+
+	defer conn.Close()
 }
 
 func runAdminMode() {

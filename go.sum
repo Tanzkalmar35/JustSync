@@ -1,5 +1,7 @@
 github.com/golang-fips/openssl/v2 v2.0.3 h1:9+J2R0BQio6Jz8+dPZf/0ylISByl0gZWjTEKm+J+y7Y=
 github.com/golang-fips/openssl/v2 v2.0.3/go.mod h1:7tuBqX2Zov8Yq5mJ2yzlKhpnxOnWyEzi38AzeWRuQdg=
+github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/klauspost/cpuid/v2 v2.0.12 h1:p9dKCg8i4gmOxtv35DvrYoWqYzQrvEVdjQ762Y0OqZE=
 github.com/klauspost/cpuid/v2 v2.0.12/go.mod h1:g2LTdtYhdyuGPqyWyv7qRAmj1WBqxuObKfj5c0PQa7c=
 github.com/zeebo/blake3 v0.2.4 h1:KYQPkhpRtcqh0ssGYcKLG1JYvddkEA8QwCM/yBqhaZI=
