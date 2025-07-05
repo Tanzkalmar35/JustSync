@@ -8,18 +8,15 @@ import (
 type RunMode string
 
 type ExternalConfig struct {
-	HostUrl    string `yml:"host"`
-	ClientName string `yml:"client"`
-}
-
-// Set implements flag.Value.
-func (e *ExternalConfig) Set(string) error {
-	panic("unimplemented")
-}
-
-// String implements flag.Value.
-func (e *ExternalConfig) String() string {
-	return string(e.HostUrl)
+	Session struct {
+		Host struct {
+			Url string `yml:"url"`
+		}
+		Client struct {
+			Name  string `yml:"name"`
+			Token string `yml:"token"`
+		}
+	}
 }
 
 const (

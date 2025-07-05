@@ -3,8 +3,13 @@ package websocket
 import (
 	"JustSync/utils"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	handshakeWait = 5 * time.Second
 )
 
 type Client struct {
@@ -26,8 +31,6 @@ func (c *Client) readPump() {
 			break
 		}
 
-		// TODO: Check if the first msg is the auth msg
-
 		c.hub.broadcast <- msg
 	}
 }
@@ -47,6 +50,40 @@ func (c *Client) writePump() {
 	}
 }
 
+func (c *Client) handleHandshake() {
+	defer func() {
+		if c.hub.isRegistered(c) {
+			c.conn.Close()
+		}
+	}()
+
+	c.conn.SetReadDeadline(time.Now().Add(handshakeWait))
+
+	msgType, msg, err := c.conn.ReadMessage()
+
+	if err != nil {
+		utils.LogError("Handshake failed: Could not read auth token")
+		return
+	}
+
+	if msgType != websocket.TextMessage {
+		utils.LogError("Handshake failed: Auth token must be a text message")
+		return
+	}
+
+	token := string(msg)
+	if !utils.GetTokenManager().ValidateOtp(token) {
+		utils.LogError("Handshake failed: Invalid auth token received")
+		return
+	}
+
+	utils.LogInfo("Handshake successful")
+
+	c.conn.SetReadDeadline(time.Time{})
+	c.hub.register <- c
+	c.readPump()
+}
+
 func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := Upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -55,9 +92,8 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
-	client.hub.register <- client
 
 	// Start read and write pumps
 	go client.writePump()
-	go client.readPump()
+	go client.handleHandshake()
 }

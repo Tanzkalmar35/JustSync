@@ -2,6 +2,7 @@ package main
 
 import (
 	"JustSync/api"
+	"JustSync/service"
 	"JustSync/utils"
 	"bufio"
 	"flag"
@@ -60,16 +61,28 @@ func runServerMode() {
 
 func runClientMode(cfg string) {
 	externalCfg := utils.GetExternalConfig(cfg)
-	host := "ws://" + externalCfg.HostUrl
+	host := "wss://" + externalCfg.Session.Host.Url + "/connect"
+	utils.LogInfo("Attempting to connect to: %s", host)
 
 	conn, _, err := websocket.DefaultDialer.Dial(host, nil)
 	if err != nil {
 		utils.LogError("Could not dial %s due to error: %s", host, err.Error())
+		return
 	}
+	defer conn.Close()
 
 	utils.LogInfo("Connection to host at %s established successfully", host)
+	utils.LogInfo("Attempting authentication handshake")
 
-	defer conn.Close()
+	err = conn.WriteMessage(websocket.TextMessage, []byte(externalCfg.Session.Client.Token))
+	if err != nil {
+		utils.LogError("Authentication token for handshake could not be sent: %s", err.Error())
+		return
+	}
+
+	service.HandleReceiveAndProcessIncomingMessages(conn)
+
+	utils.LogWarn("Connection to host has been lost. Shutting down.")
 }
 
 func runAdminMode() {

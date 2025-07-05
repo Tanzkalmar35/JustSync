@@ -1,7 +1,6 @@
 package api
 
 import (
-	"JustSync/service"
 	"JustSync/snapshot"
 	"JustSync/utils"
 	"bytes"
@@ -44,7 +43,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	service.SyncAllClients(content, hash)
+	// TODO: Broadcast sync
 	w.WriteHeader(http.StatusOK)
 }
 

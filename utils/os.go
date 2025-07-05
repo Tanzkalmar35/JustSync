@@ -142,9 +142,10 @@ func CreateConfigFolderAt(path string) {
 
 func GetExternalConfig(name string) ExternalConfig {
 	var config ExternalConfig
-	configContent, err := os.ReadFile(GetOsSpecificConfigPath() + name)
+	path := GetOsSpecificConfigPath() + "/" + name + ".yml"
+	configContent, err := os.ReadFile(path)
 	if err != nil {
-		LogError("Config '%s' not found at os' specific config path '%s'", name, GetOsSpecificConfigPath())
+		LogError("Config '%s' not found at os' specific config path '%s'", name, path)
 		return config
 	}
 

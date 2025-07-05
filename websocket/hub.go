@@ -3,6 +3,7 @@ package websocket
 import (
 	"JustSync/utils"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -38,32 +39,47 @@ func GetHub() *Hub {
 			register:   make(chan *Client),
 			unregister: make(chan *Client),
 		}
+		utils.LogInfo("Starting hub")
 		go instance.Run()
 	})
 
 	return instance
 }
 
+func (h *Hub) isRegistered(client *Client) bool {
+	_, ok := h.Clients[client]
+	return ok
+}
+
 func (h *Hub) Run() {
 	for {
 		select {
+
 		// Register client
 		case client := <-h.register:
 			h.Clients[client] = true
+			utils.LogInfo("Registered client %s", strconv.Itoa(len(h.Clients)))
+
 		// Unregister client
 		case client := <-h.unregister:
 			if _, ok := h.Clients[client]; ok {
 				delete(h.Clients, client)
 				close(client.send)
+				utils.LogInfo("Unregistered client")
+			} else {
+				utils.LogError("Error while unregistering client")
 			}
+
 		// Message received, broadcast it to all clients
 		case message := <-h.broadcast:
+			utils.LogInfo("Broadcasting message")
 			for client := range h.Clients {
 				select {
 				case client.send <- message:
 					utils.LogInfo("Message broadcasted: %s", message)
 				default:
 					// Fall back. Close and disconnect everything in case the client's send buffer is full or it is dead or stuck
+					utils.LogError("Broadcast failed - maybe the buffer of one of the clients is full or it is dead or stuck")
 					close(client.send)
 					delete(h.Clients, client)
 				}
