@@ -6,6 +6,7 @@ import (
 	"JustSync/utils"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 )
@@ -45,4 +46,11 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 
 	service.SyncAllClients(content, hash)
 	w.WriteHeader(http.StatusOK)
+}
+
+func HeartBeat(w http.ResponseWriter, r *http.Request) {
+	utils.LogInfo("Heartbeat received")
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "Heartbeat successful")
 }

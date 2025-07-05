@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    network_mode: "host"
+    command: tunnel --no-autoupdate --url http://localhost:10000 run --token ${JUSTSYNC_CLOUDFLARE_TUNNEL_TOKEN}

@@ -22,7 +22,7 @@ func main() {
 
 	// Capture run mode from cmd line args
 	flag.Var(&mode, "mode", "Run mode: server, client, admin")
-	hostUrl := flag.String("host", "", "The host url when running in client mode")
+	cfgName := flag.String("config", "", "The config to load up")
 	flag.Parse()
 
 	// Set global runtime mode
@@ -35,7 +35,7 @@ func main() {
 	case utils.ServerMode:
 		runServerMode()
 	case utils.ClientMode:
-		runClientMode(*hostUrl)
+		runClientMode(*cfgName)
 	case utils.AdminMode:
 		runAdminMode()
 	}
@@ -45,6 +45,7 @@ func runServerMode() {
 	port := ":10000"
 	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
 
+	http.HandleFunc("/heartbeat", api.HeartBeat)
 	http.HandleFunc("/setup", api.Setup)
 	http.HandleFunc("/send-sync", api.RequestSync)
 	http.HandleFunc("/connect", api.HandleConnectClient)
@@ -57,13 +58,16 @@ func runServerMode() {
 	}
 }
 
-func runClientMode(host string) {
-	host = "ws://" + host
+func runClientMode(cfg string) {
+	externalCfg := utils.GetExternalConfig(cfg)
+	host := "ws://" + externalCfg.HostUrl
 
 	conn, _, err := websocket.DefaultDialer.Dial(host, nil)
 	if err != nil {
 		utils.LogError("Could not dial %s due to error: %s", host, err.Error())
 	}
+
+	utils.LogInfo("Connection to host at %s established successfully", host)
 
 	defer conn.Close()
 }

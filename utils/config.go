@@ -7,6 +7,21 @@ import (
 
 type RunMode string
 
+type ExternalConfig struct {
+	HostUrl    string `yml:"host"`
+	ClientName string `yml:"client"`
+}
+
+// Set implements flag.Value.
+func (e *ExternalConfig) Set(string) error {
+	panic("unimplemented")
+}
+
+// String implements flag.Value.
+func (e *ExternalConfig) String() string {
+	return string(e.HostUrl)
+}
+
 const (
 	ServerMode RunMode = "server"
 	ClientMode RunMode = "client"

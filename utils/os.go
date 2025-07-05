@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeebo/blake3"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -19,7 +20,6 @@ const (
 )
 
 func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
-
 	snap := &snapshot.ProjectSnapshot{
 		Version:   "1.0",
 		Timestamp: time.Now().UnixNano(),
@@ -138,4 +138,20 @@ func CreateConfigFolderAt(path string) {
 	} else {
 		LogInfo("Config directory does already exist")
 	}
+}
+
+func GetExternalConfig(name string) ExternalConfig {
+	var config ExternalConfig
+	configContent, err := os.ReadFile(GetOsSpecificConfigPath() + name)
+	if err != nil {
+		LogError("Config '%s' not found at os' specific config path '%s'", name, GetOsSpecificConfigPath())
+		return config
+	}
+
+	if err = yaml.Unmarshal(configContent, &config); err != nil {
+		LogError("Error in config '%s' found. Could not parse config.", name)
+		return config
+	}
+
+	return config
 }
