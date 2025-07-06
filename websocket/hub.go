@@ -3,6 +3,7 @@ package websocket
 import (
 	"JustSync/utils"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -14,13 +15,29 @@ var (
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 
-		// TODO:
-		// Checks the origin of the connection.
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin: CheckOrigin,
 	}
-	instance *Hub
-	once     sync.Once
+	instance       *Hub
+	once           sync.Once
+	allowedOrigins = []string{"sync.fabianholler.live"}
 )
+
+func CheckOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+
+	// As the origin header is a browser thing, requests from machine clients do not have this header.
+	// So we just allow there
+	if origin == "" {
+		return true
+	}
+
+	if slices.Contains(allowedOrigins, origin) {
+		return true
+	}
+
+	utils.LogWarn("Connection attempt from not whitelisted url: %s", origin)
+	return false
+}
 
 type Hub struct {
 	Clients   map[*Client]bool
