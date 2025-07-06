@@ -34,7 +34,7 @@ func main() {
 	// Start logic loop
 	switch mode {
 	case utils.ServerMode:
-		runServerMode()
+		runServerMode(*cfgName)
 	case utils.ClientMode:
 		runClientMode(*cfgName)
 	case utils.AdminMode:
@@ -42,9 +42,9 @@ func main() {
 	}
 }
 
-func runServerMode() {
-	port := ":10000"
+func runServerMode(cfg string) {
 	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
+	config := utils.InitHostConfig(cfg)
 
 	http.HandleFunc("/heartbeat", api.HeartBeat)
 	http.HandleFunc("/setup", api.Setup)
@@ -52,15 +52,15 @@ func runServerMode() {
 	http.HandleFunc("/connect", api.HandleConnectClient)
 	http.HandleFunc("/admin/generateOtp", api.HandleGenerateOtp)
 
-	utils.LogInfo("Server running at port %s", port)
+	utils.LogInfo("Server running at port %s", config.Application.Port)
 
-	if err := http.ListenAndServe(port, nil); err != nil {
+	if err := http.ListenAndServe(config.Application.Port, nil); err != nil {
 		utils.LogError(err.Error())
 	}
 }
 
 func runClientMode(cfg string) {
-	externalCfg := utils.GetExternalConfig(cfg)
+	externalCfg := utils.InitClientConfig(cfg)
 	host := "wss://" + externalCfg.Session.Host.Url + "/connect"
 	utils.LogInfo("Attempting to connect to: %s", host)
 

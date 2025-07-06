@@ -7,7 +7,7 @@ import (
 
 type RunMode string
 
-type ExternalConfig struct {
+type ExternalClientConfig struct {
 	Session struct {
 		Host struct {
 			Url string `yml:"url"`
@@ -19,6 +19,13 @@ type ExternalConfig struct {
 	}
 }
 
+type ExternalHostConfig struct {
+	Application struct {
+		Port string
+		Path string
+	}
+}
+
 const (
 	ServerMode RunMode = "server"
 	ClientMode RunMode = "client"
@@ -27,6 +34,9 @@ const (
 
 var (
 	mode RunMode
+
+	hostConfig   ExternalHostConfig
+	clientConfig ExternalClientConfig
 )
 
 func (m *RunMode) String() string {
@@ -53,4 +63,28 @@ func GetMode() *RunMode {
 
 func SetMode(m RunMode) {
 	mode = m
+}
+
+func InitHostConfig(cfgName string) ExternalHostConfig {
+	once.Do(func() {
+		hostConfig = GetExternalHostConfig(cfgName)
+	})
+
+	return hostConfig
+}
+
+func GetHostConfig() ExternalHostConfig {
+	return hostConfig
+}
+
+func InitClientConfig(cfgName string) ExternalClientConfig {
+	once.Do(func() {
+		clientConfig = GetExternalClientConfig(cfgName)
+	})
+
+	return clientConfig
+}
+
+func GetClientConfig() ExternalClientConfig {
+	return clientConfig
 }

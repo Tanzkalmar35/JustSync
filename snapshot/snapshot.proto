@@ -1,15 +1,33 @@
+// To regenerate protobuf golang code:
+// protoc --go_out=. --go_opt=paths=source_relative snapshot/snapshot.proto
 syntax = "proto3";
 
 package snapshot;
 option go_package = "./snapshot";
 
 message FileChunks {
-  bytes whole_hash = 1;          // 32-byte BLAKE3 hash
+  bytes whole_hash = 1;            // 32-byte BLAKE3 hash
   repeated bytes chunk_hashes = 2; // 32-byte chunk hashes
 }
 
 message ProjectSnapshot {
-  string version = 1;            // Format version
-  int64 timestamp = 2;           // Unix nanoseconds
+  string version = 1;                // Format version
+  int64 timestamp = 2;               // Unix nanoseconds
   map<string, FileChunks> files = 3; // path → file metadata
+}
+
+message FileSync {
+  string path = 1;    // The relative file path
+  bytes content = 2;  // The raw file content
+  bytes checksum = 3; // The checksum of the file content
+}
+
+message SyncFileMessage {
+  oneof payload {
+    string StartSync = 1; // Special signal telling the receiver to prepare
+                          // receiving a new file
+    FileSync file = 2;    // The file to sync
+    string EndSync = 3;   // Special signal telling the reveiver that the file
+                          // should be fully synced.
+  }
 }

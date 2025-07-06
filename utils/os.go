@@ -140,8 +140,25 @@ func CreateConfigFolderAt(path string) {
 	}
 }
 
-func GetExternalConfig(name string) ExternalConfig {
-	var config ExternalConfig
+func GetExternalClientConfig(name string) ExternalClientConfig {
+	var config ExternalClientConfig
+	path := GetOsSpecificConfigPath() + "/" + name + ".yml"
+	configContent, err := os.ReadFile(path)
+	if err != nil {
+		LogError("Config '%s' not found at os' specific config path '%s'", name, path)
+		return config
+	}
+
+	if err = yaml.Unmarshal(configContent, &config); err != nil {
+		LogError("Error in config '%s' found. Could not parse config.", name)
+		return config
+	}
+
+	return config
+}
+
+func GetExternalHostConfig(name string) ExternalHostConfig {
+	var config ExternalHostConfig
 	path := GetOsSpecificConfigPath() + "/" + name + ".yml"
 	configContent, err := os.ReadFile(path)
 	if err != nil {
