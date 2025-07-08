@@ -9,6 +9,8 @@ type RunMode string
 
 type ExternalClientConfig struct {
 	Session struct {
+		Name string `yml:"name"`
+		Path string `yml:"path"`
 		Host struct {
 			Url string `yml:"url"`
 		}

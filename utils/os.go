@@ -142,7 +142,7 @@ func CreateConfigFolderAt(path string) {
 
 func GetExternalClientConfig(name string) ExternalClientConfig {
 	var config ExternalClientConfig
-	path := GetOsSpecificConfigPath() + "/" + name + ".yml"
+	path := filepath.Join(GetOsSpecificConfigPath(), name+".yml")
 	configContent, err := os.ReadFile(path)
 	if err != nil {
 		LogError("Config '%s' not found at os' specific config path '%s'", name, path)
@@ -159,7 +159,7 @@ func GetExternalClientConfig(name string) ExternalClientConfig {
 
 func GetExternalHostConfig(name string) ExternalHostConfig {
 	var config ExternalHostConfig
-	path := GetOsSpecificConfigPath() + "/" + name + ".yml"
+	path := filepath.Join(GetOsSpecificConfigPath(), name+".yml")
 	configContent, err := os.ReadFile(path)
 	if err != nil {
 		LogError("Config '%s' not found at os' specific config path '%s'", name, path)

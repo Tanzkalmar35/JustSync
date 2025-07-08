@@ -1,11 +1,13 @@
 package websocket
 
 import (
+	"JustSync/service"
 	"JustSync/utils"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -50,13 +52,19 @@ func (c *Client) writePump() {
 	}
 }
 
-func (c *Client) handleHandshake() {
+func (c *Client) handleConnectionPreparation() {
 	defer func() {
 		if c.hub.isRegistered(c) {
 			c.conn.Close()
 		}
 	}()
 
+	c.ExecuteHandshake()
+	c.DoFullProjectSync()
+	c.readPump()
+}
+
+func (c *Client) ExecuteHandshake() {
 	c.conn.SetReadDeadline(time.Now().Add(handshakeWait))
 
 	msgType, msg, err := c.conn.ReadMessage()
@@ -81,7 +89,25 @@ func (c *Client) handleHandshake() {
 
 	c.conn.SetReadDeadline(time.Time{})
 	c.hub.register <- c
-	c.readPump()
+}
+
+func (c *Client) DoFullProjectSync() error {
+	msgs, err := service.PrepareInitiateProjectSync()
+	if err != nil {
+		utils.LogError("Failed to initiate project sync to client due to: %s", err.Error())
+		return err
+	}
+
+	for _, msg := range msgs {
+		content, err := proto.Marshal(&msg)
+		if err != nil {
+			utils.LogError("Could not marshall file %s", msg.GetFile().Path)
+			return err
+		}
+		c.send <- content
+	}
+
+	return nil
 }
 
 func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
@@ -95,5 +121,5 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	// Start read and write pumps
 	go client.writePump()
-	go client.handleHandshake()
+	go client.handleConnectionPreparation()
 }

@@ -19,7 +19,7 @@ func main() {
 	var mode utils.RunMode = utils.ServerMode
 
 	// Logger initialization - Set debug mode
-	utils.SetLevel(utils.LevelInfo)
+	utils.SetLevel(utils.LevelDebug)
 
 	// Capture run mode from cmd line args
 	flag.Var(&mode, "mode", "Run mode: server, client, admin")
