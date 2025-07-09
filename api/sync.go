@@ -25,7 +25,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		utils.LogError("Could not read file data: " + err.Error())
+		utils.LogError("Could not read file data: %s", err.Error())
 		return
 	}
 
@@ -34,7 +34,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotAcceptable)
-		utils.LogError("Snapshot not found or corrupted, maybe restart the session? " + err.Error())
+		utils.LogError("Snapshot not found or corrupted, maybe restart the session?: %s", err.Error())
 		return
 	}
 
@@ -43,7 +43,29 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Broadcast sync
+	newChunks, err := utils.ChunkFileContentFixedSize(content)
+	if err != nil {
+		utils.LogError("An error while chunking file '%s': %s", body.path, err.Error())
+		return
+	}
+
+	var changedChunks [][]byte
+	for _, newChunk := range newChunks {
+		match := false
+		for _, chunk := range snap.Files[body.path].ChunkHashes {
+			if bytes.Equal(utils.CreateBlake3Hash(newChunk), chunk) {
+				match = true
+				break
+			}
+
+		}
+		if !match {
+			changedChunks = append(changedChunks, newChunk)
+		}
+	}
+
+	// TODO: Sync file chunks
+	// websocket.GetHub().Broadcast <-
 	w.WriteHeader(http.StatusOK)
 }
 

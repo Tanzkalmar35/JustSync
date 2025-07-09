@@ -77,7 +77,7 @@ func processFile(path string) (snapshot.FileChunks, error) {
 
 	// Split into chunks and hash these
 	// PERF: Implement smart chunking based on file size instead of fixed size
-	chunkHashes, err := chunkFileContentFixedSize(filecontent)
+	chunkHashes, err := ChunkFileContentFixedSize(filecontent)
 
 	if err != nil {
 		return snap, err
@@ -94,7 +94,7 @@ func processFile(path string) (snapshot.FileChunks, error) {
 	return snap, nil
 }
 
-func chunkFileContentFixedSize(filecontent []byte) ([][]byte, error) {
+func ChunkFileContentFixedSize(filecontent []byte) ([][]byte, error) {
 	var chunkHashes [][]byte
 
 	for offset := 0; offset < len(filecontent); offset += ChunkSize {

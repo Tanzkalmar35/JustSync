@@ -41,7 +41,7 @@ func CheckOrigin(r *http.Request) bool {
 
 type Hub struct {
 	Clients   map[*Client]bool
-	broadcast chan []byte
+	Broadcast chan []byte
 
 	register   chan *Client
 	unregister chan *Client
@@ -51,7 +51,7 @@ func GetHub() *Hub {
 	once.Do(func() {
 		instance = &Hub{
 			Clients:   make(map[*Client]bool),
-			broadcast: make(chan []byte),
+			Broadcast: make(chan []byte),
 
 			register:   make(chan *Client),
 			unregister: make(chan *Client),
@@ -88,7 +88,7 @@ func (h *Hub) Run() {
 			}
 
 		// Message received, broadcast it to all clients
-		case message := <-h.broadcast:
+		case message := <-h.Broadcast:
 			utils.LogInfo("Broadcasting message")
 			for client := range h.Clients {
 				select {
