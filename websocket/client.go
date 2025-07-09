@@ -3,6 +3,7 @@ package websocket
 import (
 	"JustSync/service"
 	"JustSync/utils"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -52,43 +53,48 @@ func (c *Client) writePump() {
 	}
 }
 
-func (c *Client) handleConnectionPreparation() {
+func (c *Client) handleConnectionPreparation(w http.ResponseWriter) {
 	defer func() {
 		if c.hub.isRegistered(c) {
 			c.conn.Close()
 		}
 	}()
 
-	c.ExecuteHandshake()
+	if err := c.ExecuteHandshake(); err != nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 	c.DoFullProjectSync()
 	c.readPump()
 }
 
-func (c *Client) ExecuteHandshake() {
+func (c *Client) ExecuteHandshake() error {
 	c.conn.SetReadDeadline(time.Now().Add(handshakeWait))
 
 	msgType, msg, err := c.conn.ReadMessage()
 
 	if err != nil {
 		utils.LogError("Handshake failed: Could not read auth token")
-		return
+		return err
 	}
 
 	if msgType != websocket.TextMessage {
 		utils.LogError("Handshake failed: Auth token must be a text message")
-		return
+		return fmt.Errorf("Handshake failed: Auth token must be a text message")
 	}
 
 	token := string(msg)
 	if !utils.GetTokenManager().ValidateOtp(token) {
 		utils.LogError("Handshake failed: Invalid auth token received")
-		return
+		return fmt.Errorf("Handshake failed: Invalid auth token received")
 	}
 
 	utils.LogInfo("Handshake successful")
 
 	c.conn.SetReadDeadline(time.Time{})
 	c.hub.register <- c
+
+	return nil
 }
 
 func (c *Client) DoFullProjectSync() error {
@@ -121,5 +127,5 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	// Start read and write pumps
 	go client.writePump()
-	go client.handleConnectionPreparation()
+	go client.handleConnectionPreparation(w)
 }

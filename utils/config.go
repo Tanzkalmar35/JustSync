@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 type RunMode string
@@ -37,8 +38,10 @@ const (
 var (
 	mode RunMode
 
-	hostConfig   ExternalHostConfig
-	clientConfig ExternalClientConfig
+	hostConfig      ExternalHostConfig
+	hostSingleton   sync.Once
+	clientConfig    ExternalClientConfig
+	clientSingleton sync.Once
 )
 
 func (m *RunMode) String() string {
@@ -68,7 +71,7 @@ func SetMode(m RunMode) {
 }
 
 func InitHostConfig(cfgName string) ExternalHostConfig {
-	once.Do(func() {
+	hostSingleton.Do(func() {
 		hostConfig = GetExternalHostConfig(cfgName)
 	})
 
@@ -80,7 +83,7 @@ func GetHostConfig() ExternalHostConfig {
 }
 
 func InitClientConfig(cfgName string) ExternalClientConfig {
-	once.Do(func() {
+	clientSingleton.Do(func() {
 		clientConfig = GetExternalClientConfig(cfgName)
 	})
 
