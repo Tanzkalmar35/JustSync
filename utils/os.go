@@ -2,8 +2,12 @@ package utils
 
 import (
 	"JustSync/snapshot"
+	"JustSync/utils"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,12 +15,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/restic/chunker"
 	"github.com/zeebo/blake3"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	ChunkSize = 4 * 1024 // 4096 bytes (4kb)
+	MinChunkSize = 4 * 1024         // 4kb
+	AvgChunkSize = 16 * 1024        // 16kb
+	MaxChunkSize = 13               // 2 to the power of 13 in practise
+	ChunkerPol   = 0x3DA3358B4DC173 // Recommended CDC polynomial
 )
 
 func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
@@ -61,57 +69,78 @@ func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
 
 func processFile(path string) (snapshot.FileChunks, error) {
 	snap := snapshot.FileChunks{
-		WholeHash:   []byte{},
-		ChunkHashes: [][]byte{},
+		WholeHash: []byte{},
+		Chunks:    []*snapshot.Chunk{},
 	}
 
-	// PERF: Consider streaming file content instead of loading full content into memory. However for now, as we are mostly working with <1mb files, this is still fine
-	filecontent, err := os.ReadFile(path)
-
+	file, err := os.Open(path)
 	if err != nil {
+		return snap, err
+	}
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	if err != nil {
+		LogError("Error while reading content of file %s: %s", file, err.Error())
 		return snap, err
 	}
 
 	// Hash whole content
-	snap.WholeHash = CreateBlake3Hash(filecontent)
+	snap.WholeHash = GetHasher()(content)
 
 	// Split into chunks and hash these
-	// PERF: Implement smart chunking based on file size instead of fixed size
-	chunkHashes, err := ChunkFileContentFixedSize(filecontent)
-
+	chunkHashes, err := ChunkFileContentDefined(file)
 	if err != nil {
 		return snap, err
 	}
 
-	snap.ChunkHashes = chunkHashes
+	snap.Chunks = chunkHashes
 
-	LogDebug(strconv.Itoa(len(snap.ChunkHashes)))
-
-	for i, hashes := range snap.ChunkHashes {
-		LogDebug("Hahes %s holds: %s", string(rune(i)), string(hashes))
-	}
-
+	LogDebug(strconv.Itoa(len(snap.Chunks)))
 	return snap, nil
 }
 
-func ChunkFileContentFixedSize(filecontent []byte) ([][]byte, error) {
-	var chunkHashes [][]byte
+// ChunkFileContentDefined chunks files using CDC
+func ChunkFileContentDefined(file io.Reader) ([]*snapshot.Chunk, error) {
+	hasher := GetHasher()
+	var chunks []*snapshot.Chunk
+	offset := int64(0)
 
-	for offset := 0; offset < len(filecontent); offset += ChunkSize {
-		end := min(offset+ChunkSize, len(filecontent))
+	chkr := chunker.NewWithBoundaries(file, chunker.Pol(ChunkerPol), MinChunkSize, MaxChunkSize)
+	chkr.SetAverageBits(MaxChunkSize)
 
-		chunk := filecontent[offset:end]
-		LogDebug("Processing chunk: %s", string(chunk))
-		chunkHashes = append(chunkHashes, CreateBlake3Hash(chunk))
+	buf := make([]byte, MaxChunkSize)
+	for {
+		c, err := chkr.Next(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			LogError("An error occured while attempting to CDC chunk file %s: %s", file, err.Error())
+			return nil, err
+		}
+
+		hash := hasher(c.Data)
+		size := int64(len(c.Data))
+
+		chunk := snapshot.Chunk{
+			Hash:   hash,
+			Offset: offset,
+			Size:   size,
+		}
+		chunks = append(chunks, &chunk)
+
+		offset += size
 	}
 
-	return chunkHashes, nil
+	return chunks, nil
 }
 
-func CreateBlake3Hash(data []byte) []byte {
-	hasher := blake3.New()
-	hasher.Write(data)
-	return hasher.Sum(nil)
+// GetHasher returns a hashing function using blake3 algorithm.
+func GetHasher() func([]byte) []byte {
+	return func(data []byte) []byte {
+		hash := blake3.Sum256(data)
+		return hash[:]
+	}
 }
 
 func GetOsSpecificConfigPath() string {

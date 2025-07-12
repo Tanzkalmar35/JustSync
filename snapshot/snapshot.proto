@@ -7,7 +7,14 @@ option go_package = "./snapshot";
 
 message FileChunks {
   bytes whole_hash = 1;            // 32-byte BLAKE3 hash
-  repeated bytes chunk_hashes = 2; // 32-byte chunk hashes
+  repeated Chunk chunks = 2;       // The chunks of this file created using CDC - Content defined chunking
+
+}
+
+message Chunk {
+  bytes hash = 1; // Chunk hash
+  int64 size = 2; // Chunk size (Using CDC - Content defined chunking)
+  int64 offset = 3; // The chunk's offset in file
 }
 
 message ProjectSnapshot {

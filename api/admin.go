@@ -12,7 +12,7 @@ func HandleGenerateOtp(w http.ResponseWriter, r *http.Request) {
 	if token == "SECRETKEY" {
 		otp := utils.GetTokenManager().GenerateOtp()
 		utils.LogInfo("One time password request accepted. Generated %s", otp)
-		fmt.Fprintf(w, otp)
+		fmt.Fprintf(w, "%s", otp)
 		return
 	}
 }
