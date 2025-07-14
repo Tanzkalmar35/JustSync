@@ -62,34 +62,29 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Implement chunk changes thingy
-	// compareWithSnapshot detects changes from previous state
-	// func compareWithSnapshot(current *FileManifest, previous *FileManifest, chunkData []ChunkMetadata) *SyncOperation {
-	// 	op := &SyncOperation{
-	// 		NewChunks:  make(map[string][]byte),
-	// 		Manifest:   *current,
-	// 		TotalBytes: 0,
-	// 	}
-	//
-	// 	// Create lookup for existing chunks on server
-	// 	existingSet := make(map[string]bool)
-	// 	if previous != nil {
-	// 		for _, hash := range previous.Chunks {
-	// 			existingSet[hash] = true
-	// 		}
-	// 	}
-	//
-	// 	// Identify new chunks and prepare for transfer
-	// 	for _, meta := range chunkData {
-	// 		if !existingSet[meta.Hash] {
-	// 			op.TotalBytes += int64(meta.Size)
-	// 		} else {
-	// 			op.ExistingBytes += int64(meta.Size)
-	// 		}
-	// 	}
-	//
-	// 	return op
-	// }
+	oldChunkMap := make(map[string]*snapshot.Chunk) // hash -> Chunk
+	newChunkMap := make(map[string]*snapshot.Chunk) // hash -> Chunk
+	for _, chunk := range snap.Files[body.path].Chunks {
+		oldChunkMap[string(chunk.Hash)] = chunk
+	}
+	for _, chunk := range newChunks {
+		newChunkMap[string(chunk.Hash)] = chunk
+	}
+
+	chunksToSync := make(map[string]snapshot.Chunk) // hash -> Chunk
+	for _, chunk := range newChunkMap {
+		if oldChunk, exists := oldChunkMap[string(chunk.Hash)]; !exists {
+			// Chunk added
+		} else if oldChunk.Offset != chunk.Offset {
+			// Chunk moved
+		}
+	}
+
+	for hash, oldChunk := range oldChunkMap {
+		if _, exists := newChunkMap[hash]; !exists {
+			// Found a removed chunk
+		}
+	}
 
 	// TODO: Sync file chunks
 	// websocket.GetHub().Broadcast <-

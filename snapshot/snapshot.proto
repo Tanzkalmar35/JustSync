@@ -8,13 +8,21 @@ option go_package = "./snapshot";
 message FileChunks {
   bytes whole_hash = 1;            // 32-byte BLAKE3 hash
   repeated Chunk chunks = 2;       // The chunks of this file created using CDC - Content defined chunking
-
 }
 
 message Chunk {
-  bytes hash = 1; // Chunk hash
-  int64 size = 2; // Chunk size (Using CDC - Content defined chunking)
-  int64 offset = 3; // The chunk's offset in file
+  enum ChangeType {
+    UNCHANGED = 0;  // Default value for existing chunks
+    ADD = 1;
+    REMOVE = 2;
+    MOVE = 3;
+  }
+  
+  bytes hash = 1; // The blake3 checksum of this chunk
+  int64 size = 2; // The size of this chunk
+  int64 offset = 3; // The offset of this chunk
+  ChangeType change_type = 4;  // Optional field for sync operations
+  int64 old_offset = 5;        // Previous offset for MOVE operations
 }
 
 message ProjectSnapshot {
