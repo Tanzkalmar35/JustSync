@@ -3,7 +3,6 @@ package api
 import (
 	"JustSync/snapshot"
 	"JustSync/utils"
-	"JustSync/websocket"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -51,7 +50,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Checking if changes were made
-	if bytes.Equal(hash, snap.Files[body.path].WholeHash) {
+	if bytes.Equal(hash, snap.Files[body.path].Checksum) {
 		utils.LogInfo("Sync request rejected, no change in file detected.")
 		return
 	}
@@ -66,52 +65,29 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	oldChunkMap := make(map[string]*snapshot.Chunk) // hash -> Chunk
 	newChunkMap := make(map[string]*snapshot.Chunk) // hash -> Chunk
 	for _, chunk := range snap.Files[body.path].Chunks {
-		oldChunkMap[string(chunk.Hash)] = chunk
+		oldChunkMap[string(chunk.Checksum)] = chunk
 	}
 	for _, chunk := range newChunks {
-		newChunkMap[string(chunk.Hash)] = chunk
+		newChunkMap[string(chunk.Checksum)] = chunk
 	}
 
 	chunksToSync := make(map[string]snapshot.Chunk) // hash -> Chunk
 	for _, newChunk := range newChunkMap {
-		if oldChunk, exists := oldChunkMap[string(newChunk.Hash)]; !exists {
+		if oldChunk, exists := oldChunkMap[string(newChunk.Checksum)]; !exists {
 			// Chunk added
-			newChunk.ChangeType = snapshot.Chunk_ADD
-			chunksToSync[string(newChunk.Hash)] = *newChunk
 		} else if oldChunk.Offset != newChunk.Offset {
 			// Chunk moved
-			newChunk.ChangeType = snapshot.Chunk_MOVE
-			chunksToSync[string(newChunk.Hash)] = *newChunk
 		}
 	}
 
 	for hash, oldChunk := range oldChunkMap {
 		if _, exists := newChunkMap[hash]; !exists {
 			// Found a removed chunk
-			oldChunk.ChangeType = snapshot.Chunk_REMOVE
-			chunksToSync[string(oldChunk.Hash)] = *oldChunk
 		}
 	}
+	// deltaMsg := &snapshot.
 
-	startMsg, err := json.Marshal(snapshot.SyncFileMessage_StartSync{})
-	if err != nil {
-		// TODO:
-	}
-	websocket.GetHub().Broadcast <- startMsg
-
-	for _, chunk := range chunksToSync {
-		syncMsg, err := json.Marshal(chunk)
-		if err != nil {
-			// TODO:
-		}
-		websocket.GetHub().Broadcast <- syncMsg
-	}
-
-	endMsg, err := json.Marshal(snapshot.SyncFileMessage_EndSync{})
-	if err != nil {
-		// TODO:
-	}
-	websocket.GetHub().Broadcast <- endMsg
+	// websocket.GetHub().Broadcast <- endMsg
 	w.WriteHeader(http.StatusOK)
 }
 

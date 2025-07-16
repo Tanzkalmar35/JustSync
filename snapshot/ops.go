@@ -2,21 +2,13 @@ package snapshot
 
 import (
 	"os"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 )
 
 func CreateSnapshot() *ProjectSnapshot {
 	return &ProjectSnapshot{
-		Version:   "1.0",
-		Timestamp: time.Now().UnixNano(),
-		Files:     map[string]*FileChunks{
-			// "src/main.go": {
-			// 	WholeHash:   createBlake3Hash(32), // Replace with real BLAKE3
-			// 	ChunkHashes: [][]byte{createBlake3Hash(32), createBlake3Hash(32)},
-			// },
-		},
+		Files: map[string]*File{},
 	}
 }
 

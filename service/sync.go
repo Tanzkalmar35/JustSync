@@ -3,22 +3,18 @@ package service
 import (
 	"JustSync/snapshot"
 	"JustSync/utils"
-	"bytes"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 )
 
-func PrepareInitiateProjectSync() ([]snapshot.SyncFileMessage, error) {
+func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 	projectRoot := utils.GetHostConfig().Application.Path
-	var messages []snapshot.SyncFileMessage
+	var messages []snapshot.WebsocketMessage
 
 	// Append start sync msg
-	startSyncMsg := snapshot.SyncFileMessage{
-		Payload: &snapshot.SyncFileMessage_StartSync{},
-	}
+	startSyncMsg := snapshot.WebsocketMessage_StartSync{}
 	messages = append(messages, startSyncMsg)
 
 	// Append sync msg's for each file
@@ -92,39 +88,7 @@ func PrepareReceiveProjectSync() error {
 	return nil
 }
 
-// ProcessNewFileSync builds up a file at a given path and fills it with the desired content
-func ProcessNewFileSync(msg snapshot.SyncFileMessage_File) error {
-	// Check content checksum
-	contentHash := utils.GetHasher()(msg.File.Content)
-	if !bytes.Equal(contentHash, msg.File.Checksum) {
-		errMsg := "Error during file data transmission, checksum mismatch!"
-		utils.LogError("%s", errMsg)
-		return fmt.Errorf("%s", errMsg)
-	}
-
-	// Build the path for the new file
-	cfg := utils.GetClientConfig()
-	path := filepath.Join(cfg.Session.Path, cfg.Session.Name, msg.File.Path)
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		utils.LogError("Unable to create directory structure '%s' due to: %s", dir, err.Error())
-		return err
-	}
-
-	// Create the actual file
-	file, err := os.Create(path)
-	if err != nil {
-		utils.LogError("Could not create file %s due to error: %s", path, err.Error())
-		return err
-	}
-
-	// Fill the file with the actual content
-	b, err := file.Write(msg.File.Content)
-	if err != nil {
-		utils.LogError("Could not write content to file at '%s' due to: %s", msg.File.Path, err.Error())
-		return err
-	}
-
-	utils.LogInfo("Wrote %b bytes to %s", b, msg.File.Path)
+// ApplyFileDelta builds up a file at a given path and fills it with the desired content
+func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 	return nil
 }

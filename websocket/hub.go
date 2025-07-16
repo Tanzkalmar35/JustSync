@@ -45,6 +45,7 @@ type Hub struct {
 
 	register   chan *Client
 	unregister chan *Client
+	mu         sync.RWMutex
 }
 
 func GetHub() *Hub {
@@ -64,6 +65,8 @@ func GetHub() *Hub {
 }
 
 func (h *Hub) isRegistered(client *Client) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	_, ok := h.Clients[client]
 	return ok
 }
@@ -74,11 +77,14 @@ func (h *Hub) Run() {
 
 		// Register client
 		case client := <-h.register:
+			h.mu.Lock()
 			h.Clients[client] = true
 			utils.LogInfo("Registered client %s", strconv.Itoa(len(h.Clients)))
+			h.mu.Unlock()
 
 		// Unregister client
 		case client := <-h.unregister:
+			h.mu.Lock()
 			if _, ok := h.Clients[client]; ok {
 				delete(h.Clients, client)
 				close(client.send)
@@ -86,10 +92,12 @@ func (h *Hub) Run() {
 			} else {
 				utils.LogError("Error while unregistering client")
 			}
+			h.mu.Unlock()
 
 		// Message received, broadcast it to all clients
 		case message := <-h.Broadcast:
 			utils.LogInfo("Broadcasting message")
+			h.mu.Lock()
 			for client := range h.Clients {
 				select {
 				case client.send <- message:
@@ -101,6 +109,7 @@ func (h *Hub) Run() {
 					delete(h.Clients, client)
 				}
 			}
+			h.mu.Unlock()
 		}
 	}
 }

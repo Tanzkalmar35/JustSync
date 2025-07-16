@@ -24,9 +24,10 @@ func HandleCreateSnapshot(path string) error {
 	return nil
 }
 
+// CLIENT: Main event loop
 func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 	for {
-		msgType, rawMsg, err := conn.ReadMessage() // <-- _ = msg
+		msgType, rawMsg, err := conn.ReadMessage()
 		if err != nil {
 			utils.LogError("An error occured while receiving message from host: %s", err.Error())
 			break
@@ -40,28 +41,23 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 			return
 		}
 
-		var msg snapshot.SyncFileMessage
+		var msg snapshot.WebsocketMessage
 		if err := proto.Unmarshal(rawMsg, &msg); err != nil {
 			utils.LogError("Failed to unmarshal protobuf message received from websocket: %s", err.Error())
 			continue
 		}
 
 		switch t := msg.Payload.(type) {
-		case *snapshot.SyncFileMessage_StartSync:
-			utils.LogInfo("Initial project sync started. Copying project to %s", utils.GetClientConfig().Session.Path)
-			if err := PrepareReceiveProjectSync(); err != nil {
-				utils.LogError("Failed to prepare project sync: %s", err.Error())
-			}
-		case *snapshot.SyncFileMessage_File:
-			utils.LogInfo("Received file: %s", t.File.Path)
+		case *snapshot.WebsocketMessage_FileDelta:
+			utils.LogInfo("Received file: %s", t.FileDelta.Path)
 			start := time.Now()
-			if err := ProcessNewFileSync(*t); err != nil {
-				utils.LogError("Could not process file sync of file '%s' due to %s", t.File.Path, err.Error())
+			if err := ApplyFileDelta(*t); err != nil {
+				utils.LogError("Could not process file sync of file '%s' due to %s", t.FileDelta.Path, err.Error())
 			}
 			elapsed := time.Since(start)
-			utils.LogInfo("Successfully processed %s in %s", t.File.Path, elapsed)
-		case *snapshot.SyncFileMessage_EndSync:
-			utils.LogInfo("Finished sync!")
+			utils.LogInfo("Successfully processed %s in %s", t.FileDelta.Path, elapsed)
+		case *snapshot.WebsocketMessage_ResyncRequest:
+			utils.LogInfo("Unexpected resync request received from server.")
 		default:
 			utils.LogError("Recieved message of unexpected type: %T", t)
 		}

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/restic/chunker"
 	"github.com/zeebo/blake3"
@@ -18,17 +17,15 @@ import (
 )
 
 const (
-	MinChunkSize = 4 * 1024         // 4kb
-	AvgChunkSize = 16 * 1024        // 16kb
-	MaxChunkSize = 13               // 2 to the power of 13 in practise
+	MinChunkSize = 1 << 11          // 2kb
+	AvgChunkSize = 1 << 13          // 8kb
+	MaxChunkSize = 1 << 15          // 32 kb
 	ChunkerPol   = 0x3DA3358B4DC173 // Recommended CDC polynomial
 )
 
 func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
 	snap := &snapshot.ProjectSnapshot{
-		Version:   "1.0",
-		Timestamp: time.Now().UnixNano(),
-		Files:     map[string]*snapshot.FileChunks{},
+		Files: map[string]*snapshot.File{},
 	}
 
 	if info, err := os.Stat(root); err != nil {
@@ -64,11 +61,8 @@ func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
 	return snap, nil
 }
 
-func processFile(path string) (snapshot.FileChunks, error) {
-	snap := snapshot.FileChunks{
-		WholeHash: []byte{},
-		Chunks:    []*snapshot.Chunk{},
-	}
+func processFile(path string) (snapshot.File, error) {
+	snap := snapshot.File{}
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -82,7 +76,7 @@ func processFile(path string) (snapshot.FileChunks, error) {
 	}
 
 	// Hash whole content
-	snap.WholeHash = GetHasher()(content)
+	snap.Checksum = GetHasher()(content)
 
 	// Split into chunks and hash these
 	chunkHashes, err := ChunkFileContentDefined(file)
@@ -103,7 +97,7 @@ func ChunkFileContentDefined(file io.Reader) ([]*snapshot.Chunk, error) {
 	offset := int64(0)
 
 	chkr := chunker.NewWithBoundaries(file, chunker.Pol(ChunkerPol), MinChunkSize, MaxChunkSize)
-	chkr.SetAverageBits(MaxChunkSize)
+	chkr.SetAverageBits(AvgChunkSize)
 
 	buf := make([]byte, MaxChunkSize)
 	for {
@@ -120,9 +114,9 @@ func ChunkFileContentDefined(file io.Reader) ([]*snapshot.Chunk, error) {
 		size := int64(len(c.Data))
 
 		chunk := snapshot.Chunk{
-			Hash:   hash,
-			Offset: offset,
-			Size:   size,
+			Checksum: hash,
+			Offset:   offset,
+			Size:     size,
 		}
 		chunks = append(chunks, &chunk)
 

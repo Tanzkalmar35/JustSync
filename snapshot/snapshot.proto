@@ -5,44 +5,88 @@ syntax = "proto3";
 package snapshot;
 option go_package = "./snapshot";
 
-message FileChunks {
-  bytes whole_hash = 1;            // 32-byte BLAKE3 hash
-  repeated Chunk chunks = 2;       // The chunks of this file created using CDC - Content defined chunking
-}
+// --------------------------------------------- SYNCHRONIZATION
 
-message Chunk {
-  enum ChangeType {
-    UNCHANGED = 0;  // Default value for existing chunks
-    ADD = 1;
-    REMOVE = 2;
-    MOVE = 3;
-  }
-  
-  bytes hash = 1; // The blake3 checksum of this chunk
-  int64 size = 2; // The size of this chunk
-  int64 offset = 3; // The offset of this chunk
-  ChangeType change_type = 4;  // Optional field for sync operations
-  int64 old_offset = 5;        // Previous offset for MOVE operations
-}
-
-message ProjectSnapshot {
-  string version = 1;                // Format version
-  int64 timestamp = 2;               // Unix nanoseconds
-  map<string, FileChunks> files = 3; // path → file metadata
-}
-
-message FileSync {
-  string path = 1;    // The relative file path
-  bytes content = 2;  // The raw file content
-  bytes checksum = 3; // The checksum of the file content
-}
-
-message SyncFileMessage {
+// The top-level message for all websocket communication.
+message WebsocketMessage {
   oneof payload {
-    string StartSync = 1; // Special signal telling the receiver to prepare
-                          // receiving a new file
-    FileSync file = 2;    // The file to sync
-    string EndSync = 3;   // Special signal telling the reveiver that the file
-                          // should be fully synced.
+    // SERVER -> CLIENT: The primary message. Contains all the changes for a
+    // single file.
+    FileDelta file_delta = 1;
+
+    // CLIENT -> SERVER: A mechanism for a client to signal it's out of sync and
+    // needs a full project resync.
+    FullResyncRequest resync_request = 2;
+
+    StartProjectSync start_sync = 3;
+    EndProjectSync end_sync = 4;
   }
+}
+
+// A self-contained package describing all the changes for a single file
+// needed to bring it from State N-1 to the newest State N.
+message FileDelta {
+  // The relative path of the file that was modified.
+  string path = 1;
+
+  // The final BLAKE3 hash of the entire file after the delta is applied.
+  // The client MUST use this to verify the patch was successful.
+  bytes checksum = 2;
+
+  // A list of chunks that are NEW to the file. Their content is included.
+  repeated AddedChunk added_chunks = 3;
+
+  // A list of hashes for chunks that were REMOVED from the file.
+  repeated bytes removed_chunk_hashes = 4;
+
+  // A list of chunks that were already in the file but MOVED to a new position.
+  repeated MovedChunk moved_chunks = 5;
+}
+
+// Carries the content and metadata for a new chunk.
+message AddedChunk {
+  bytes hash = 1;
+  bytes content = 2;
+  int64 new_offset = 3;
+}
+
+// Describes the new position for an existing chunk.
+message MovedChunk {
+  bytes hash = 1;
+  int64 new_offset = 2;
+}
+
+// An empty message from a client to the host.
+// Its presence signals that the client has encountered an error
+// and needs the host to initiate the full, initial project sync protocol again.
+message FullResyncRequest {}
+
+message StartProjectSync {}
+
+message EndProjectSync {}
+
+// --------------------------------------------- SNAPSHOT
+
+// A full project snapshot message
+message ProjectSnapshot {
+  // The project represented as a map of files it consists of
+  map<string, File> files = 1; // path -> file
+}
+
+// A plain file used for storing rather than synchronizing
+message File {
+  // The file's checksum (a BLAKE3 generated hash of it's content)
+  bytes checksum = 1;
+  // A list of chunks representing this file's content
+  repeated Chunk chunks = 2;
+}
+
+// A plain chunk used for storing rather than synchronizing
+message Chunk {
+  // The chunk's checksum (a BLAKE3 generated hash of it's content)
+  bytes checksum = 1;
+  // The offset of the chunk from the beginning of the file
+  int64 offset = 2;
+  // Teh size of the chunk in bytes
+  int64 size = 3;
 }
