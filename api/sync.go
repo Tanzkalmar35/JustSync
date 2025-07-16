@@ -3,6 +3,7 @@ package api
 import (
 	"JustSync/snapshot"
 	"JustSync/utils"
+	"JustSync/websocket"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -72,22 +73,45 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chunksToSync := make(map[string]snapshot.Chunk) // hash -> Chunk
-	for _, chunk := range newChunkMap {
-		if oldChunk, exists := oldChunkMap[string(chunk.Hash)]; !exists {
+	for _, newChunk := range newChunkMap {
+		if oldChunk, exists := oldChunkMap[string(newChunk.Hash)]; !exists {
 			// Chunk added
-		} else if oldChunk.Offset != chunk.Offset {
+			newChunk.ChangeType = snapshot.Chunk_ADD
+			chunksToSync[string(newChunk.Hash)] = *newChunk
+		} else if oldChunk.Offset != newChunk.Offset {
 			// Chunk moved
+			newChunk.ChangeType = snapshot.Chunk_MOVE
+			chunksToSync[string(newChunk.Hash)] = *newChunk
 		}
 	}
 
 	for hash, oldChunk := range oldChunkMap {
 		if _, exists := newChunkMap[hash]; !exists {
 			// Found a removed chunk
+			oldChunk.ChangeType = snapshot.Chunk_REMOVE
+			chunksToSync[string(oldChunk.Hash)] = *oldChunk
 		}
 	}
 
-	// TODO: Sync file chunks
-	// websocket.GetHub().Broadcast <-
+	startMsg, err := json.Marshal(snapshot.SyncFileMessage_StartSync{})
+	if err != nil {
+		// TODO:
+	}
+	websocket.GetHub().Broadcast <- startMsg
+
+	for _, chunk := range chunksToSync {
+		syncMsg, err := json.Marshal(chunk)
+		if err != nil {
+			// TODO:
+		}
+		websocket.GetHub().Broadcast <- syncMsg
+	}
+
+	endMsg, err := json.Marshal(snapshot.SyncFileMessage_EndSync{})
+	if err != nil {
+		// TODO:
+	}
+	websocket.GetHub().Broadcast <- endMsg
 	w.WriteHeader(http.StatusOK)
 }
 

@@ -95,7 +95,7 @@ func PrepareReceiveProjectSync() error {
 // ProcessNewFileSync builds up a file at a given path and fills it with the desired content
 func ProcessNewFileSync(msg snapshot.SyncFileMessage_File) error {
 	// Check content checksum
-	contentHash := utils.CreateBlake3Hash(msg.File.Content)
+	contentHash := utils.GetHasher()(msg.File.Content)
 	if !bytes.Equal(contentHash, msg.File.Checksum) {
 		errMsg := "Error during file data transmission, checksum mismatch!"
 		utils.LogError("%s", errMsg)

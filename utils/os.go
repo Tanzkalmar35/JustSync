@@ -2,9 +2,6 @@ package utils
 
 import (
 	"JustSync/snapshot"
-	"JustSync/utils"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
