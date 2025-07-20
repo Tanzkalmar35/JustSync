@@ -105,6 +105,41 @@ func PrepareReceiveProjectSync() error {
 	return nil
 }
 
+// ProcessNewFileSync builds up a file at a given path and fills it with the desired content
+func ProcessNewFileSync(msg snapshot.WebsocketMessage_InitialFile) error {
+	// Build the path for the new file
+	cfg := utils.GetClientConfig()
+	path := filepath.Join(cfg.Session.Path, cfg.Session.Name, string(msg.InitialFile.Path))
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		utils.LogError("Unable to create directory structure '%s' due to: %s", dir, err.Error())
+		return err
+	}
+
+	// Create the actual file
+	file, err := os.Create(path)
+	if err != nil {
+		utils.LogError("Could not create file %s due to error: %s", path, err.Error())
+		return err
+	}
+
+	// Fill the file with the actual content
+	totalWrittenBytes := 0
+	for _, chunk := range msg.InitialFile.File.Chunks {
+		b, err := file.WriteAt(chunk.Content, chunk.Offset)
+		if err != nil {
+			utils.LogError("Could not write content to file at '%s' due to: %s", msg.InitialFile.Path, err.Error())
+			return err
+		}
+		totalWrittenBytes += b
+		utils.LogDebug("Wrote chunk of size %s to file %s", b, msg.InitialFile.Path)
+	}
+
+	// Check content checksum
+	utils.LogInfo("Wrote %b bytes to %s", totalWrittenBytes, msg.InitialFile.Path)
+	return nil
+}
+
 // ApplyFileDelta builds up a file at a given path and fills it with the desired content
 func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 	return nil

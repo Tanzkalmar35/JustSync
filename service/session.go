@@ -48,6 +48,12 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 		}
 
 		switch t := msg.Payload.(type) {
+		case *snapshot.WebsocketMessage_StartSync:
+			utils.LogInfo("Preparing to sync!")
+			if err := PrepareReceiveProjectSync(); err != nil {
+				utils.LogError("Something went wrong preparing to receive initial project sync: %s", err.Error())
+				return
+			}
 		case *snapshot.WebsocketMessage_FileDelta:
 			utils.LogInfo("Received file: %s", t.FileDelta.Path)
 			start := time.Now()
@@ -56,6 +62,16 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 			}
 			elapsed := time.Since(start)
 			utils.LogInfo("Successfully processed %s in %s", t.FileDelta.Path, elapsed)
+		case *snapshot.WebsocketMessage_InitialFile:
+			utils.LogInfo("Received file: %s", t.InitialFile.Path)
+			start := time.Now()
+			if err := ProcessNewFileSync(*t); err != nil {
+				utils.LogError("Could not process file sync of file '%s' due to %s", t.InitialFile.Path, err.Error())
+			}
+			elapsed := time.Since(start)
+			utils.LogInfo("Successfully processed %s in %s", t.InitialFile.Path, elapsed)
+		case *snapshot.WebsocketMessage_EndSync:
+			utils.LogInfo("Finishing sync up!")
 		default:
 			utils.LogError("Recieved message of unexpected type: %T", t)
 		}

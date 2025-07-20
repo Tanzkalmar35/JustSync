@@ -5,10 +5,16 @@ import (
 	"JustSync/utils"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
+)
+
+var (
+	client     Client
+	clientLock sync.Once
 )
 
 const (
@@ -17,18 +23,26 @@ const (
 
 type Client struct {
 	hub  *Hub
-	conn *websocket.Conn
+	Conn *websocket.Conn
 	send chan []byte
+}
+
+func SetClient(conn *websocket.Conn) {
+	client = Client{Conn: conn}
+}
+
+func GetClient() Client {
+	return client
 }
 
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		c.Conn.Close()
 	}()
 
 	for {
-		_, msg, err := c.conn.ReadMessage()
+		_, msg, err := c.Conn.ReadMessage()
 		if err != nil {
 			// Client disconnected
 			break
@@ -39,29 +53,31 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	defer c.conn.Close()
+	defer c.Conn.Close()
 
 	for {
 		select {
 		case msg, ok := <-c.send:
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					utils.LogError("Error writing message %s to server.", msg)
+				}
 				return
 			}
-			c.conn.WriteMessage(websocket.TextMessage, msg)
+			c.Conn.WriteMessage(websocket.TextMessage, msg)
 		}
 	}
 }
 
-func (c *Client) handleConnectionPreparation(w http.ResponseWriter) {
+func (c *Client) handleConnectionPreparation() {
 	defer func() {
 		if c.hub.isRegistered(c) {
-			c.conn.Close()
+			c.Conn.Close()
 		}
 	}()
 
 	if err := c.ExecuteHandshake(); err != nil {
-		w.WriteHeader(http.StatusForbidden)
+		c.Conn.Close()
 		return
 	}
 	c.DoFullProjectSync()
@@ -69,9 +85,9 @@ func (c *Client) handleConnectionPreparation(w http.ResponseWriter) {
 }
 
 func (c *Client) ExecuteHandshake() error {
-	c.conn.SetReadDeadline(time.Now().Add(handshakeWait))
+	c.Conn.SetReadDeadline(time.Now().Add(handshakeWait))
 
-	msgType, msg, err := c.conn.ReadMessage()
+	msgType, msg, err := c.Conn.ReadMessage()
 
 	if err != nil {
 		utils.LogError("Handshake failed: Could not read auth token")
@@ -91,7 +107,7 @@ func (c *Client) ExecuteHandshake() error {
 
 	utils.LogInfo("Handshake successful")
 
-	c.conn.SetReadDeadline(time.Time{})
+	c.Conn.SetReadDeadline(time.Time{})
 	c.hub.register <- c
 
 	return nil
@@ -123,9 +139,9 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := &Client{hub: hub, Conn: conn, send: make(chan []byte, 256)}
 
 	// Start read and write pumps
 	go client.writePump()
-	go client.handleConnectionPreparation(w)
+	go client.handleConnectionPreparation()
 }

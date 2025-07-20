@@ -4,6 +4,7 @@ import (
 	"JustSync/api"
 	"JustSync/service"
 	"JustSync/utils"
+	socket "JustSync/websocket"
 	"bufio"
 	"flag"
 	"fmt"
@@ -19,7 +20,7 @@ func main() {
 	var mode utils.RunMode = utils.ServerMode
 
 	// Logger initialization - Set debug mode
-	utils.SetLevel(utils.LevelDebug)
+	utils.SetLevel(utils.LevelInfo)
 
 	// Capture run mode from cmd line args
 	flag.Var(&mode, "mode", "Run mode: server, client, admin")
@@ -80,6 +81,7 @@ func runClientMode(cfg string) {
 		return
 	}
 
+	socket.SetClient(conn)
 	service.HandleReceiveAndProcessIncomingMessages(conn)
 
 	utils.LogWarn("Connection to host has been lost. Shutting down.")

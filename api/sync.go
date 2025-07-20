@@ -3,12 +3,16 @@ package api
 import (
 	"JustSync/snapshot"
 	"JustSync/utils"
+	socket "JustSync/websocket"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+
+	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 func RequestSync(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +106,17 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TODO: Actually to host/server for it to broadcast
+	msgWrapper := snapshot.WebsocketMessage{
+		Payload: &snapshot.WebsocketMessage_FileDelta{
+			FileDelta: &msg,
+		},
+	}
+	msgBytes, err := proto.Marshal(&msgWrapper)
+	if err != nil {
+		utils.LogError("Invalid msg constructed, could not sync file %s. Error: %s", msg.Path, err.Error())
+		return
+	}
+	socket.GetClient().Conn.WriteMessage(websocket.TextMessage, msgBytes)
 
 	// websocket.GetHub().Broadcast <- endMsg
 	w.WriteHeader(http.StatusOK)
