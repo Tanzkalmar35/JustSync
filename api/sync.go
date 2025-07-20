@@ -62,8 +62,8 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	oldChunkMap := make(map[string]*snapshot.Chunk) // hash -> Chunk
-	newChunkMap := make(map[string]*snapshot.Chunk) // hash -> Chunk
+	oldChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
+	newChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
 	for _, chunk := range snap.Files[body.path].Chunks {
 		oldChunkMap[string(chunk.Checksum)] = chunk
 	}
@@ -71,21 +71,38 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		newChunkMap[string(chunk.Checksum)] = chunk
 	}
 
-	chunksToSync := make(map[string]snapshot.Chunk) // hash -> Chunk
+	msg := snapshot.FileDelta{
+		Path:               body.path,
+		Checksum:           hash,
+		AddedChunks:        []*snapshot.AddedChunk{},
+		MovedChunks:        []*snapshot.MovedChunk{},
+		RemovedChunkHashes: [][]byte{},
+	}
+
 	for _, newChunk := range newChunkMap {
 		if oldChunk, exists := oldChunkMap[string(newChunk.Checksum)]; !exists {
 			// Chunk added
+			msg.AddedChunks = append(msg.AddedChunks, &snapshot.AddedChunk{
+				Checksum:  newChunk.Checksum,
+				Content:   newChunk.Content,
+				NewOffset: newChunk.Offset,
+			})
 		} else if oldChunk.Offset != newChunk.Offset {
 			// Chunk moved
+			msg.MovedChunks = append(msg.MovedChunks, &snapshot.MovedChunk{
+				Checksum:  newChunk.Checksum,
+				NewOffset: newChunk.Offset,
+			})
 		}
 	}
 
-	for hash, oldChunk := range oldChunkMap {
+	for hash := range oldChunkMap {
 		if _, exists := newChunkMap[hash]; !exists {
-			// Found a removed chunk
+			msg.RemovedChunkHashes = append(msg.RemovedChunkHashes, []byte(hash))
 		}
 	}
-	// deltaMsg := &snapshot.
+
+	// TODO: Actually to host/server for it to broadcast
 
 	// websocket.GetHub().Broadcast <- endMsg
 	w.WriteHeader(http.StatusOK)

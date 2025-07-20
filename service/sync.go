@@ -4,6 +4,7 @@ import (
 	"JustSync/snapshot"
 	"JustSync/utils"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,10 +13,9 @@ import (
 func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 	projectRoot := utils.GetHostConfig().Application.Path
 	var messages []snapshot.WebsocketMessage
-
 	// Append start sync msg
 	startSyncMsg := snapshot.WebsocketMessage_StartSync{}
-	messages = append(messages, startSyncMsg)
+	messages = append(messages, snapshot.WebsocketMessage{Payload: &startSyncMsg})
 
 	// Append sync msg's for each file
 	if err := filepath.WalkDir(projectRoot, func(absolutePath string, d fs.DirEntry, err error) error {
@@ -29,11 +29,12 @@ func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 			return nil
 		}
 
-		fileContent, err := os.ReadFile(absolutePath)
+		file, err := os.Open(absolutePath)
 		if err != nil {
 			utils.LogError("Error reading file at %s: %s", absolutePath, err.Error())
 			return err
 		}
+		defer file.Close()
 
 		relativePath, err := filepath.Rel(projectRoot, absolutePath)
 		if err != nil {
@@ -41,13 +42,29 @@ func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 			return err
 		}
 
-		fileSync := &snapshot.FileSync{
-			Checksum: utils.CreateBlake3Hash(fileContent),
-			Path:     relativePath,
-			Content:  fileContent,
+		fileChunks, err := utils.ChunkFileContentDefined(file)
+		if err != nil {
+			utils.LogError("Could not chunk content of file %s due to error: %s", absolutePath, err.Error())
+			return err
 		}
-		syncMsg := snapshot.SyncFileMessage{
-			Payload: &snapshot.SyncFileMessage_File{File: fileSync},
+
+		fileContent, err := io.ReadAll(file)
+		if err != nil {
+			utils.LogError("Could not read content of file %s due to error: %s", absolutePath, err.Error())
+			return err
+		}
+
+		fileSync := &snapshot.InitialSyncFile{
+			Checksum: utils.GetHasher()(fileContent),
+			Chunks:   fileChunks,
+		}
+		syncMsg := snapshot.WebsocketMessage{
+			Payload: &snapshot.WebsocketMessage_InitialFile{
+				InitialFile: &snapshot.InitialSyncFileWithPath{
+					Path: []byte(relativePath),
+					File: fileSync,
+				},
+			},
 		}
 		messages = append(messages, syncMsg)
 
@@ -58,8 +75,8 @@ func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 	}
 
 	// Append end sync msg
-	endSyncMsg := snapshot.SyncFileMessage{
-		Payload: &snapshot.SyncFileMessage_EndSync{},
+	endSyncMsg := snapshot.WebsocketMessage{
+		Payload: &snapshot.WebsocketMessage_EndSync{},
 	}
 	messages = append(messages, endSyncMsg)
 

@@ -30,7 +30,7 @@ type WebsocketMessage struct {
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*WebsocketMessage_FileDelta
-	//	*WebsocketMessage_ResyncRequest
+	//	*WebsocketMessage_InitialFile
 	//	*WebsocketMessage_StartSync
 	//	*WebsocketMessage_EndSync
 	Payload       isWebsocketMessage_Payload `protobuf_oneof:"payload"`
@@ -84,10 +84,10 @@ func (x *WebsocketMessage) GetFileDelta() *FileDelta {
 	return nil
 }
 
-func (x *WebsocketMessage) GetResyncRequest() *FullResyncRequest {
+func (x *WebsocketMessage) GetInitialFile() *InitialSyncFileWithPath {
 	if x != nil {
-		if x, ok := x.Payload.(*WebsocketMessage_ResyncRequest); ok {
-			return x.ResyncRequest
+		if x, ok := x.Payload.(*WebsocketMessage_InitialFile); ok {
+			return x.InitialFile
 		}
 	}
 	return nil
@@ -121,23 +121,22 @@ type WebsocketMessage_FileDelta struct {
 	FileDelta *FileDelta `protobuf:"bytes,1,opt,name=file_delta,json=fileDelta,proto3,oneof"`
 }
 
-type WebsocketMessage_ResyncRequest struct {
-	// CLIENT -> SERVER: A mechanism for a client to signal it's out of sync and
-	// needs a full project resync.
-	ResyncRequest *FullResyncRequest `protobuf:"bytes,2,opt,name=resync_request,json=resyncRequest,proto3,oneof"`
+type WebsocketMessage_InitialFile struct {
+	// SERVER -> CLIENT: Sends a file for initial project sync to the client
+	InitialFile *InitialSyncFileWithPath `protobuf:"bytes,3,opt,name=initial_file,json=initialFile,proto3,oneof"`
 }
 
 type WebsocketMessage_StartSync struct {
-	StartSync *StartProjectSync `protobuf:"bytes,3,opt,name=start_sync,json=startSync,proto3,oneof"`
+	StartSync *StartProjectSync `protobuf:"bytes,4,opt,name=start_sync,json=startSync,proto3,oneof"`
 }
 
 type WebsocketMessage_EndSync struct {
-	EndSync *EndProjectSync `protobuf:"bytes,4,opt,name=end_sync,json=endSync,proto3,oneof"`
+	EndSync *EndProjectSync `protobuf:"bytes,5,opt,name=end_sync,json=endSync,proto3,oneof"`
 }
 
 func (*WebsocketMessage_FileDelta) isWebsocketMessage_Payload() {}
 
-func (*WebsocketMessage_ResyncRequest) isWebsocketMessage_Payload() {}
+func (*WebsocketMessage_InitialFile) isWebsocketMessage_Payload() {}
 
 func (*WebsocketMessage_StartSync) isWebsocketMessage_Payload() {}
 
@@ -230,7 +229,7 @@ func (x *FileDelta) GetMovedChunks() []*MovedChunk {
 // Carries the content and metadata for a new chunk.
 type AddedChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Hash          []byte                 `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`
+	Checksum      []byte                 `protobuf:"bytes,1,opt,name=checksum,proto3" json:"checksum,omitempty"`
 	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
 	NewOffset     int64                  `protobuf:"varint,3,opt,name=new_offset,json=newOffset,proto3" json:"new_offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -267,9 +266,9 @@ func (*AddedChunk) Descriptor() ([]byte, []int) {
 	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *AddedChunk) GetHash() []byte {
+func (x *AddedChunk) GetChecksum() []byte {
 	if x != nil {
-		return x.Hash
+		return x.Checksum
 	}
 	return nil
 }
@@ -291,7 +290,7 @@ func (x *AddedChunk) GetNewOffset() int64 {
 // Describes the new position for an existing chunk.
 type MovedChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Hash          []byte                 `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`
+	Checksum      []byte                 `protobuf:"bytes,1,opt,name=checksum,proto3" json:"checksum,omitempty"`
 	NewOffset     int64                  `protobuf:"varint,2,opt,name=new_offset,json=newOffset,proto3" json:"new_offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -327,9 +326,9 @@ func (*MovedChunk) Descriptor() ([]byte, []int) {
 	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *MovedChunk) GetHash() []byte {
+func (x *MovedChunk) GetChecksum() []byte {
 	if x != nil {
-		return x.Hash
+		return x.Checksum
 	}
 	return nil
 }
@@ -341,45 +340,6 @@ func (x *MovedChunk) GetNewOffset() int64 {
 	return 0
 }
 
-// An empty message from a client to the host.
-// Its presence signals that the client has encountered an error
-// and needs the host to initiate the full, initial project sync protocol again.
-type FullResyncRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FullResyncRequest) Reset() {
-	*x = FullResyncRequest{}
-	mi := &file_snapshot_snapshot_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FullResyncRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FullResyncRequest) ProtoMessage() {}
-
-func (x *FullResyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_snapshot_snapshot_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FullResyncRequest.ProtoReflect.Descriptor instead.
-func (*FullResyncRequest) Descriptor() ([]byte, []int) {
-	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{4}
-}
-
 type StartProjectSync struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -388,7 +348,7 @@ type StartProjectSync struct {
 
 func (x *StartProjectSync) Reset() {
 	*x = StartProjectSync{}
-	mi := &file_snapshot_snapshot_proto_msgTypes[5]
+	mi := &file_snapshot_snapshot_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -400,7 +360,7 @@ func (x *StartProjectSync) String() string {
 func (*StartProjectSync) ProtoMessage() {}
 
 func (x *StartProjectSync) ProtoReflect() protoreflect.Message {
-	mi := &file_snapshot_snapshot_proto_msgTypes[5]
+	mi := &file_snapshot_snapshot_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -413,7 +373,7 @@ func (x *StartProjectSync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartProjectSync.ProtoReflect.Descriptor instead.
 func (*StartProjectSync) Descriptor() ([]byte, []int) {
-	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{5}
+	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{4}
 }
 
 type EndProjectSync struct {
@@ -424,7 +384,7 @@ type EndProjectSync struct {
 
 func (x *EndProjectSync) Reset() {
 	*x = EndProjectSync{}
-	mi := &file_snapshot_snapshot_proto_msgTypes[6]
+	mi := &file_snapshot_snapshot_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -436,7 +396,7 @@ func (x *EndProjectSync) String() string {
 func (*EndProjectSync) ProtoMessage() {}
 
 func (x *EndProjectSync) ProtoReflect() protoreflect.Message {
-	mi := &file_snapshot_snapshot_proto_msgTypes[6]
+	mi := &file_snapshot_snapshot_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,21 +409,199 @@ func (x *EndProjectSync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndProjectSync.ProtoReflect.Descriptor instead.
 func (*EndProjectSync) Descriptor() ([]byte, []int) {
+	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{5}
+}
+
+type InitialSyncFileWithPath struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          []byte                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	File          *InitialSyncFile       `protobuf:"bytes,2,opt,name=file,proto3" json:"file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitialSyncFileWithPath) Reset() {
+	*x = InitialSyncFileWithPath{}
+	mi := &file_snapshot_snapshot_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitialSyncFileWithPath) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitialSyncFileWithPath) ProtoMessage() {}
+
+func (x *InitialSyncFileWithPath) ProtoReflect() protoreflect.Message {
+	mi := &file_snapshot_snapshot_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitialSyncFileWithPath.ProtoReflect.Descriptor instead.
+func (*InitialSyncFileWithPath) Descriptor() ([]byte, []int) {
 	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{6}
 }
 
-// A full project snapshot message
-type ProjectSnapshot struct {
+func (x *InitialSyncFileWithPath) GetPath() []byte {
+	if x != nil {
+		return x.Path
+	}
+	return nil
+}
+
+func (x *InitialSyncFileWithPath) GetFile() *InitialSyncFile {
+	if x != nil {
+		return x.File
+	}
+	return nil
+}
+
+// A plain file used for storing rather than synchronizing
+type InitialSyncFile struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The project represented as a map of files it consists of
-	Files         map[string]*File `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // path -> file
+	// The file's checksum (a BLAKE3 generated hash of it's content)
+	Checksum []byte `protobuf:"bytes,2,opt,name=checksum,proto3" json:"checksum,omitempty"`
+	// A list of chunks representing this file's content
+	Chunks        []*InitialSyncChunk `protobuf:"bytes,3,rep,name=chunks,proto3" json:"chunks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitialSyncFile) Reset() {
+	*x = InitialSyncFile{}
+	mi := &file_snapshot_snapshot_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitialSyncFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitialSyncFile) ProtoMessage() {}
+
+func (x *InitialSyncFile) ProtoReflect() protoreflect.Message {
+	mi := &file_snapshot_snapshot_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitialSyncFile.ProtoReflect.Descriptor instead.
+func (*InitialSyncFile) Descriptor() ([]byte, []int) {
+	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *InitialSyncFile) GetChecksum() []byte {
+	if x != nil {
+		return x.Checksum
+	}
+	return nil
+}
+
+func (x *InitialSyncFile) GetChunks() []*InitialSyncChunk {
+	if x != nil {
+		return x.Chunks
+	}
+	return nil
+}
+
+// A plain chunk used for storing rather than synchronizing
+type InitialSyncChunk struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The chunk's checksum (a BLAKE3 generated hash of it's content)
+	Checksum []byte `protobuf:"bytes,1,opt,name=checksum,proto3" json:"checksum,omitempty"`
+	// The chunk's actual content
+	Content []byte `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	// The offset of the chunk from the beginning of the file
+	Offset int64 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	// Teh size of the chunk in bytes
+	Size          int64 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InitialSyncChunk) Reset() {
+	*x = InitialSyncChunk{}
+	mi := &file_snapshot_snapshot_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InitialSyncChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InitialSyncChunk) ProtoMessage() {}
+
+func (x *InitialSyncChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_snapshot_snapshot_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InitialSyncChunk.ProtoReflect.Descriptor instead.
+func (*InitialSyncChunk) Descriptor() ([]byte, []int) {
+	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *InitialSyncChunk) GetChecksum() []byte {
+	if x != nil {
+		return x.Checksum
+	}
+	return nil
+}
+
+func (x *InitialSyncChunk) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *InitialSyncChunk) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *InitialSyncChunk) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type ProjectSnapshot struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Files         map[string]*InitialSyncFile `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // path -> file
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProjectSnapshot) Reset() {
 	*x = ProjectSnapshot{}
-	mi := &file_snapshot_snapshot_proto_msgTypes[7]
+	mi := &file_snapshot_snapshot_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -475,7 +613,7 @@ func (x *ProjectSnapshot) String() string {
 func (*ProjectSnapshot) ProtoMessage() {}
 
 func (x *ProjectSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_snapshot_snapshot_proto_msgTypes[7]
+	mi := &file_snapshot_snapshot_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -488,181 +626,65 @@ func (x *ProjectSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectSnapshot.ProtoReflect.Descriptor instead.
 func (*ProjectSnapshot) Descriptor() ([]byte, []int) {
-	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{7}
+	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *ProjectSnapshot) GetFiles() map[string]*File {
+func (x *ProjectSnapshot) GetFiles() map[string]*InitialSyncFile {
 	if x != nil {
 		return x.Files
 	}
 	return nil
 }
 
-// A plain file used for storing rather than synchronizing
-type File struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The file's checksum (a BLAKE3 generated hash of it's content)
-	Checksum []byte `protobuf:"bytes,1,opt,name=checksum,proto3" json:"checksum,omitempty"`
-	// A list of chunks representing this file's content
-	Chunks        []*Chunk `protobuf:"bytes,2,rep,name=chunks,proto3" json:"chunks,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *File) Reset() {
-	*x = File{}
-	mi := &file_snapshot_snapshot_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *File) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*File) ProtoMessage() {}
-
-func (x *File) ProtoReflect() protoreflect.Message {
-	mi := &file_snapshot_snapshot_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use File.ProtoReflect.Descriptor instead.
-func (*File) Descriptor() ([]byte, []int) {
-	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *File) GetChecksum() []byte {
-	if x != nil {
-		return x.Checksum
-	}
-	return nil
-}
-
-func (x *File) GetChunks() []*Chunk {
-	if x != nil {
-		return x.Chunks
-	}
-	return nil
-}
-
-// A plain chunk used for storing rather than synchronizing
-type Chunk struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The chunk's checksum (a BLAKE3 generated hash of it's content)
-	Checksum []byte `protobuf:"bytes,1,opt,name=checksum,proto3" json:"checksum,omitempty"`
-	// The offset of the chunk from the beginning of the file
-	Offset int64 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`
-	// Teh size of the chunk in bytes
-	Size          int64 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Chunk) Reset() {
-	*x = Chunk{}
-	mi := &file_snapshot_snapshot_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Chunk) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Chunk) ProtoMessage() {}
-
-func (x *Chunk) ProtoReflect() protoreflect.Message {
-	mi := &file_snapshot_snapshot_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Chunk.ProtoReflect.Descriptor instead.
-func (*Chunk) Descriptor() ([]byte, []int) {
-	return file_snapshot_snapshot_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *Chunk) GetChecksum() []byte {
-	if x != nil {
-		return x.Checksum
-	}
-	return nil
-}
-
-func (x *Chunk) GetOffset() int64 {
-	if x != nil {
-		return x.Offset
-	}
-	return 0
-}
-
-func (x *Chunk) GetSize() int64 {
-	if x != nil {
-		return x.Size
-	}
-	return 0
-}
-
 var File_snapshot_snapshot_proto protoreflect.FileDescriptor
 
 const file_snapshot_snapshot_proto_rawDesc = "" +
 	"\n" +
-	"\x17snapshot/snapshot.proto\x12\bsnapshot\"\x8d\x02\n" +
+	"\x17snapshot/snapshot.proto\x12\bsnapshot\"\x8f\x02\n" +
 	"\x10WebsocketMessage\x124\n" +
 	"\n" +
-	"file_delta\x18\x01 \x01(\v2\x13.snapshot.FileDeltaH\x00R\tfileDelta\x12D\n" +
-	"\x0eresync_request\x18\x02 \x01(\v2\x1b.snapshot.FullResyncRequestH\x00R\rresyncRequest\x12;\n" +
+	"file_delta\x18\x01 \x01(\v2\x13.snapshot.FileDeltaH\x00R\tfileDelta\x12F\n" +
+	"\finitial_file\x18\x03 \x01(\v2!.snapshot.InitialSyncFileWithPathH\x00R\vinitialFile\x12;\n" +
 	"\n" +
-	"start_sync\x18\x03 \x01(\v2\x1a.snapshot.StartProjectSyncH\x00R\tstartSync\x125\n" +
-	"\bend_sync\x18\x04 \x01(\v2\x18.snapshot.EndProjectSyncH\x00R\aendSyncB\t\n" +
+	"start_sync\x18\x04 \x01(\v2\x1a.snapshot.StartProjectSyncH\x00R\tstartSync\x125\n" +
+	"\bend_sync\x18\x05 \x01(\v2\x18.snapshot.EndProjectSyncH\x00R\aendSyncB\t\n" +
 	"\apayload\"\xdf\x01\n" +
 	"\tFileDelta\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
 	"\bchecksum\x18\x02 \x01(\fR\bchecksum\x127\n" +
 	"\fadded_chunks\x18\x03 \x03(\v2\x14.snapshot.AddedChunkR\vaddedChunks\x120\n" +
 	"\x14removed_chunk_hashes\x18\x04 \x03(\fR\x12removedChunkHashes\x127\n" +
-	"\fmoved_chunks\x18\x05 \x03(\v2\x14.snapshot.MovedChunkR\vmovedChunks\"Y\n" +
+	"\fmoved_chunks\x18\x05 \x03(\v2\x14.snapshot.MovedChunkR\vmovedChunks\"a\n" +
 	"\n" +
-	"AddedChunk\x12\x12\n" +
-	"\x04hash\x18\x01 \x01(\fR\x04hash\x12\x18\n" +
+	"AddedChunk\x12\x1a\n" +
+	"\bchecksum\x18\x01 \x01(\fR\bchecksum\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\fR\acontent\x12\x1d\n" +
 	"\n" +
-	"new_offset\x18\x03 \x01(\x03R\tnewOffset\"?\n" +
+	"new_offset\x18\x03 \x01(\x03R\tnewOffset\"G\n" +
 	"\n" +
-	"MovedChunk\x12\x12\n" +
-	"\x04hash\x18\x01 \x01(\fR\x04hash\x12\x1d\n" +
+	"MovedChunk\x12\x1a\n" +
+	"\bchecksum\x18\x01 \x01(\fR\bchecksum\x12\x1d\n" +
 	"\n" +
-	"new_offset\x18\x02 \x01(\x03R\tnewOffset\"\x13\n" +
-	"\x11FullResyncRequest\"\x12\n" +
+	"new_offset\x18\x02 \x01(\x03R\tnewOffset\"\x12\n" +
 	"\x10StartProjectSync\"\x10\n" +
-	"\x0eEndProjectSync\"\x97\x01\n" +
+	"\x0eEndProjectSync\"\\\n" +
+	"\x17InitialSyncFileWithPath\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\fR\x04path\x12-\n" +
+	"\x04file\x18\x02 \x01(\v2\x19.snapshot.InitialSyncFileR\x04file\"a\n" +
+	"\x0fInitialSyncFile\x12\x1a\n" +
+	"\bchecksum\x18\x02 \x01(\fR\bchecksum\x122\n" +
+	"\x06chunks\x18\x03 \x03(\v2\x1a.snapshot.InitialSyncChunkR\x06chunks\"t\n" +
+	"\x10InitialSyncChunk\x12\x1a\n" +
+	"\bchecksum\x18\x01 \x01(\fR\bchecksum\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x12\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\"\xa2\x01\n" +
 	"\x0fProjectSnapshot\x12:\n" +
-	"\x05files\x18\x01 \x03(\v2$.snapshot.ProjectSnapshot.FilesEntryR\x05files\x1aH\n" +
+	"\x05files\x18\x01 \x03(\v2$.snapshot.ProjectSnapshot.FilesEntryR\x05files\x1aS\n" +
 	"\n" +
 	"FilesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12$\n" +
-	"\x05value\x18\x02 \x01(\v2\x0e.snapshot.FileR\x05value:\x028\x01\"K\n" +
-	"\x04File\x12\x1a\n" +
-	"\bchecksum\x18\x01 \x01(\fR\bchecksum\x12'\n" +
-	"\x06chunks\x18\x02 \x03(\v2\x0f.snapshot.ChunkR\x06chunks\"O\n" +
-	"\x05Chunk\x12\x1a\n" +
-	"\bchecksum\x18\x01 \x01(\fR\bchecksum\x12\x16\n" +
-	"\x06offset\x18\x02 \x01(\x03R\x06offset\x12\x12\n" +
-	"\x04size\x18\x03 \x01(\x03R\x04sizeB\fZ\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12/\n" +
+	"\x05value\x18\x02 \x01(\v2\x19.snapshot.InitialSyncFileR\x05value:\x028\x01B\fZ\n" +
 	"./snapshotb\x06proto3"
 
 var (
@@ -679,33 +701,34 @@ func file_snapshot_snapshot_proto_rawDescGZIP() []byte {
 
 var file_snapshot_snapshot_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_snapshot_snapshot_proto_goTypes = []any{
-	(*WebsocketMessage)(nil),  // 0: snapshot.WebsocketMessage
-	(*FileDelta)(nil),         // 1: snapshot.FileDelta
-	(*AddedChunk)(nil),        // 2: snapshot.AddedChunk
-	(*MovedChunk)(nil),        // 3: snapshot.MovedChunk
-	(*FullResyncRequest)(nil), // 4: snapshot.FullResyncRequest
-	(*StartProjectSync)(nil),  // 5: snapshot.StartProjectSync
-	(*EndProjectSync)(nil),    // 6: snapshot.EndProjectSync
-	(*ProjectSnapshot)(nil),   // 7: snapshot.ProjectSnapshot
-	(*File)(nil),              // 8: snapshot.File
-	(*Chunk)(nil),             // 9: snapshot.Chunk
-	nil,                       // 10: snapshot.ProjectSnapshot.FilesEntry
+	(*WebsocketMessage)(nil),        // 0: snapshot.WebsocketMessage
+	(*FileDelta)(nil),               // 1: snapshot.FileDelta
+	(*AddedChunk)(nil),              // 2: snapshot.AddedChunk
+	(*MovedChunk)(nil),              // 3: snapshot.MovedChunk
+	(*StartProjectSync)(nil),        // 4: snapshot.StartProjectSync
+	(*EndProjectSync)(nil),          // 5: snapshot.EndProjectSync
+	(*InitialSyncFileWithPath)(nil), // 6: snapshot.InitialSyncFileWithPath
+	(*InitialSyncFile)(nil),         // 7: snapshot.InitialSyncFile
+	(*InitialSyncChunk)(nil),        // 8: snapshot.InitialSyncChunk
+	(*ProjectSnapshot)(nil),         // 9: snapshot.ProjectSnapshot
+	nil,                             // 10: snapshot.ProjectSnapshot.FilesEntry
 }
 var file_snapshot_snapshot_proto_depIdxs = []int32{
 	1,  // 0: snapshot.WebsocketMessage.file_delta:type_name -> snapshot.FileDelta
-	4,  // 1: snapshot.WebsocketMessage.resync_request:type_name -> snapshot.FullResyncRequest
-	5,  // 2: snapshot.WebsocketMessage.start_sync:type_name -> snapshot.StartProjectSync
-	6,  // 3: snapshot.WebsocketMessage.end_sync:type_name -> snapshot.EndProjectSync
+	6,  // 1: snapshot.WebsocketMessage.initial_file:type_name -> snapshot.InitialSyncFileWithPath
+	4,  // 2: snapshot.WebsocketMessage.start_sync:type_name -> snapshot.StartProjectSync
+	5,  // 3: snapshot.WebsocketMessage.end_sync:type_name -> snapshot.EndProjectSync
 	2,  // 4: snapshot.FileDelta.added_chunks:type_name -> snapshot.AddedChunk
 	3,  // 5: snapshot.FileDelta.moved_chunks:type_name -> snapshot.MovedChunk
-	10, // 6: snapshot.ProjectSnapshot.files:type_name -> snapshot.ProjectSnapshot.FilesEntry
-	9,  // 7: snapshot.File.chunks:type_name -> snapshot.Chunk
-	8,  // 8: snapshot.ProjectSnapshot.FilesEntry.value:type_name -> snapshot.File
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	7,  // 6: snapshot.InitialSyncFileWithPath.file:type_name -> snapshot.InitialSyncFile
+	8,  // 7: snapshot.InitialSyncFile.chunks:type_name -> snapshot.InitialSyncChunk
+	10, // 8: snapshot.ProjectSnapshot.files:type_name -> snapshot.ProjectSnapshot.FilesEntry
+	7,  // 9: snapshot.ProjectSnapshot.FilesEntry.value:type_name -> snapshot.InitialSyncFile
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_snapshot_snapshot_proto_init() }
@@ -715,7 +738,7 @@ func file_snapshot_snapshot_proto_init() {
 	}
 	file_snapshot_snapshot_proto_msgTypes[0].OneofWrappers = []any{
 		(*WebsocketMessage_FileDelta)(nil),
-		(*WebsocketMessage_ResyncRequest)(nil),
+		(*WebsocketMessage_InitialFile)(nil),
 		(*WebsocketMessage_StartSync)(nil),
 		(*WebsocketMessage_EndSync)(nil),
 	}

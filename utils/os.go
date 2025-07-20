@@ -23,11 +23,11 @@ const (
 	ChunkerPol   = 0x3DA3358B4DC173 // Recommended CDC polynomial
 )
 
-func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
+// TODO: Refactor to make modular
+func CreateSnapshotOfDir(root string) (*snapshot.ProjectSnapshot, error) {
 	snap := &snapshot.ProjectSnapshot{
-		Files: map[string]*snapshot.File{},
+		Files: map[string]*snapshot.InitialSyncFile{},
 	}
-
 	if info, err := os.Stat(root); err != nil {
 		return snap, fmt.Errorf("Invalid path: %w", err)
 	} else if !info.IsDir() {
@@ -44,7 +44,7 @@ func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
 			return nil
 		}
 
-		filesnap, e := processFile(path)
+		filesnap, e := CreateSnapshotOfFile(path)
 
 		if e != nil {
 			// Handle but don't abort on file processing errors
@@ -61,8 +61,8 @@ func ProcessDir(root string) (*snapshot.ProjectSnapshot, error) {
 	return snap, nil
 }
 
-func processFile(path string) (snapshot.File, error) {
-	snap := snapshot.File{}
+func CreateSnapshotOfFile(path string) (snapshot.InitialSyncFile, error) {
+	snap := snapshot.InitialSyncFile{}
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -71,7 +71,7 @@ func processFile(path string) (snapshot.File, error) {
 	defer file.Close()
 	content, err := io.ReadAll(file)
 	if err != nil {
-		LogError("Error while reading content of file %s: %s", file, err.Error())
+		LogError("Error while reading content of file %s: %s", file.Name(), err.Error())
 		return snap, err
 	}
 
@@ -91,9 +91,9 @@ func processFile(path string) (snapshot.File, error) {
 }
 
 // ChunkFileContentDefined chunks files using CDC
-func ChunkFileContentDefined(file io.Reader) ([]*snapshot.Chunk, error) {
+func ChunkFileContentDefined(file io.Reader) ([]*snapshot.InitialSyncChunk, error) {
 	hasher := GetHasher()
-	var chunks []*snapshot.Chunk
+	var chunks []*snapshot.InitialSyncChunk
 	offset := int64(0)
 
 	chkr := chunker.NewWithBoundaries(file, chunker.Pol(ChunkerPol), MinChunkSize, MaxChunkSize)
@@ -110,11 +110,11 @@ func ChunkFileContentDefined(file io.Reader) ([]*snapshot.Chunk, error) {
 			return nil, err
 		}
 
-		hash := hasher(c.Data)
 		size := int64(len(c.Data))
 
-		chunk := snapshot.Chunk{
-			Checksum: hash,
+		chunk := snapshot.InitialSyncChunk{
+			Checksum: hasher(c.Data),
+			Content:  c.Data,
 			Offset:   offset,
 			Size:     size,
 		}

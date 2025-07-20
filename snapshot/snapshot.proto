@@ -14,12 +14,11 @@ message WebsocketMessage {
     // single file.
     FileDelta file_delta = 1;
 
-    // CLIENT -> SERVER: A mechanism for a client to signal it's out of sync and
-    // needs a full project resync.
-    FullResyncRequest resync_request = 2;
+    // SERVER -> CLIENT: Sends a file for initial project sync to the client
+    InitialSyncFileWithPath initial_file = 3;
 
-    StartProjectSync start_sync = 3;
-    EndProjectSync end_sync = 4;
+    StartProjectSync start_sync = 4;
+    EndProjectSync end_sync = 5;
   }
 }
 
@@ -45,48 +44,50 @@ message FileDelta {
 
 // Carries the content and metadata for a new chunk.
 message AddedChunk {
-  bytes hash = 1;
+  bytes checksum = 1;
   bytes content = 2;
   int64 new_offset = 3;
 }
 
 // Describes the new position for an existing chunk.
 message MovedChunk {
-  bytes hash = 1;
+  bytes checksum = 1;
   int64 new_offset = 2;
 }
-
-// An empty message from a client to the host.
-// Its presence signals that the client has encountered an error
-// and needs the host to initiate the full, initial project sync protocol again.
-message FullResyncRequest {}
 
 message StartProjectSync {}
 
 message EndProjectSync {}
 
-// --------------------------------------------- SNAPSHOT
+// --------------------------------------------- Inital sync
 
-// A full project snapshot message
-message ProjectSnapshot {
-  // The project represented as a map of files it consists of
-  map<string, File> files = 1; // path -> file
+message InitialSyncFileWithPath {
+  bytes path = 1;
+  InitialSyncFile file = 2;
 }
 
 // A plain file used for storing rather than synchronizing
-message File {
+message InitialSyncFile {
   // The file's checksum (a BLAKE3 generated hash of it's content)
-  bytes checksum = 1;
+  bytes checksum = 2;
   // A list of chunks representing this file's content
-  repeated Chunk chunks = 2;
+  repeated InitialSyncChunk chunks = 3;
 }
 
 // A plain chunk used for storing rather than synchronizing
-message Chunk {
+message InitialSyncChunk {
   // The chunk's checksum (a BLAKE3 generated hash of it's content)
   bytes checksum = 1;
+  // The chunk's actual content
+  bytes content = 2;
   // The offset of the chunk from the beginning of the file
-  int64 offset = 2;
+  int64 offset = 3;
   // Teh size of the chunk in bytes
-  int64 size = 3;
+  int64 size = 4;
+}
+
+// --------------------------------------------- Inital sync
+
+message ProjectSnapshot {
+  map<string, InitialSyncFile> files = 1; // path -> file
 }

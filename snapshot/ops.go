@@ -8,7 +8,7 @@ import (
 
 func CreateSnapshot() *ProjectSnapshot {
 	return &ProjectSnapshot{
-		Files: map[string]*File{},
+		Files: map[string]*InitialSyncFile{},
 	}
 }
 

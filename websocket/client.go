@@ -107,7 +107,7 @@ func (c *Client) DoFullProjectSync() error {
 	for _, msg := range msgs {
 		content, err := proto.Marshal(&msg)
 		if err != nil {
-			utils.LogError("Could not marshall file %s", msg.GetFile().Path)
+			utils.LogError("Unexpected error: could not marshall file.")
 			return err
 		}
 		c.send <- content

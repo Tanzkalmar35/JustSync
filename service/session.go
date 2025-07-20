@@ -12,7 +12,7 @@ import (
 func HandleCreateSnapshot(path string) error {
 	snappath := "snapshot/SNAPSHOT.sync.snap"
 
-	snap, err := utils.ProcessDir(path)
+	snap, err := utils.CreateSnapshotOfDir(path)
 
 	if err != nil {
 		return err
@@ -56,8 +56,6 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 			}
 			elapsed := time.Since(start)
 			utils.LogInfo("Successfully processed %s in %s", t.FileDelta.Path, elapsed)
-		case *snapshot.WebsocketMessage_ResyncRequest:
-			utils.LogInfo("Unexpected resync request received from server.")
 		default:
 			utils.LogError("Recieved message of unexpected type: %T", t)
 		}
