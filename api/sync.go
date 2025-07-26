@@ -19,7 +19,9 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	utils.LogInfo("Sync requested")
 
 	// Receive message content
-	var body struct{ path string }
+	var body struct {
+		Path string `json:"path"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		utils.LogError("Invalid json body data provided")
@@ -27,7 +29,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Getting file content
-	file, err := os.Open(body.path)
+	file, err := os.Open(body.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		utils.LogError("Could not read file data: %s", err.Error())
@@ -54,7 +56,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Checking if changes were made
-	if bytes.Equal(hash, snap.Files[body.path].Checksum) {
+	if bytes.Equal(hash, snap.Files[body.Path].Checksum) {
 		utils.LogInfo("Sync request rejected, no change in file detected.")
 		return
 	}
@@ -62,13 +64,13 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	// Chunk new file content
 	newChunks, err := utils.ChunkFileContentDefined(file)
 	if err != nil {
-		utils.LogError("An error while chunking file '%s': %s", body.path, err.Error())
+		utils.LogError("An error while chunking file '%s': %s", body.Path, err.Error())
 		return
 	}
 
 	oldChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
 	newChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
-	for _, chunk := range snap.Files[body.path].Chunks {
+	for _, chunk := range snap.Files[body.Path].Chunks {
 		oldChunkMap[string(chunk.Checksum)] = chunk
 	}
 	for _, chunk := range newChunks {
@@ -76,7 +78,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := snapshot.FileDelta{
-		Path:               body.path,
+		Path:               body.Path,
 		Checksum:           hash,
 		AddedChunks:        []*snapshot.AddedChunk{},
 		MovedChunks:        []*snapshot.MovedChunk{},
@@ -118,8 +120,9 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 	socket.GetClient().Conn.WriteMessage(websocket.TextMessage, msgBytes)
 
-	// websocket.GetHub().Broadcast <- endMsg
 	w.WriteHeader(http.StatusOK)
+
+	utils.LogInfo("Sync accepted and sent to host")
 }
 
 func HeartBeat(w http.ResponseWriter, r *http.Request) {

@@ -142,5 +142,6 @@ func ProcessNewFileSync(msg snapshot.WebsocketMessage_InitialFile) error {
 
 // ApplyFileDelta builds up a file at a given path and fills it with the desired content
 func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
+	// TODO: Implement
 	return nil
 }
