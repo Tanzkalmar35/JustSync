@@ -48,12 +48,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	// Reading snapshot
 	hasher := utils.GetHasher()
 	hash := hasher(content)
-	snap, err := snapshot.ReadSnapshot("snapshot/SNAPSHOT.sync.snap")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotAcceptable)
-		utils.LogError("Snapshot not found or corrupted, maybe restart the session?: %s", err.Error())
-		return
-	}
+	snap := snapshot.GetSnapshot()
 
 	// Checking if changes were made
 	if bytes.Equal(hash, snap.Files[body.Path].Checksum) {
@@ -68,6 +63,11 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prepare new snapshot object
+	newSnapshot := snapshot.GetSnapshot()
+	newSnapshot.Files[body.Path].Checksum = hash
+
+	// Prepare file delta calculation
 	oldChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
 	newChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
 	for _, chunk := range snap.Files[body.Path].Chunks {
@@ -75,7 +75,10 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, chunk := range newChunks {
 		newChunkMap[string(chunk.Checksum)] = chunk
+		newSnapshot.Files[body.Path].Chunks = append(newSnapshot.Files[body.Path].Chunks, chunk)
 	}
+
+	snapshot.WriteSnapshot(newSnapshot)
 
 	msg := snapshot.FileDelta{
 		Path:               body.Path,

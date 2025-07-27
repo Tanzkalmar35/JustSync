@@ -2,38 +2,34 @@ package snapshot
 
 import (
 	"os"
+	"sync"
 
 	"google.golang.org/protobuf/proto"
 )
 
-func CreateSnapshot() *ProjectSnapshot {
-	return &ProjectSnapshot{
-		Files: map[string]*InitialSyncFile{},
-	}
+const (
+	SnapPath string = "snapshot/SNAPSHOT.sync.snap"
+)
+
+var (
+	snapshot   *ProjectSnapshot
+	snapshotMu sync.Mutex
+)
+
+func GetSnapshot() *ProjectSnapshot {
+	return snapshot
 }
 
-func WriteSnapshot(snap *ProjectSnapshot, path string) error {
-	// Proto encoding (3-5x faster than JSON)
+func WriteSnapshot(snap *ProjectSnapshot) error {
+	snapshotMu.Lock()
+	defer snapshotMu.Unlock()
+
 	data, err := proto.Marshal(snap)
 	if err != nil {
 		return err
 	}
 
-	// Optional compression (zstd reduces 60-70%)
-	// compressed := zstd.Compress(nil, data)
+	snapshot = snap
 
-	return os.WriteFile(path, data, 0644)
-}
-
-func ReadSnapshot(path string) (*ProjectSnapshot, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Optional decompression
-	// data = zstd.Decompress(nil, data)
-
-	snap := &ProjectSnapshot{}
-	return snap, proto.Unmarshal(data, snap)
+	return os.WriteFile(SnapPath, data, 0644)
 }
