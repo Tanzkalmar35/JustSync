@@ -47,9 +47,6 @@ func runServerMode(cfg string) {
 	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
 	config := utils.InitHostConfig(cfg)
 
-	http.HandleFunc("/heartbeat", api.HeartBeat)
-	http.HandleFunc("/setup", api.Setup)
-	http.HandleFunc("/send-sync", api.RequestSync)
 	http.HandleFunc("/connect", api.HandleConnectClient)
 	http.HandleFunc("/admin/generateOtp", api.HandleGenerateOtp)
 
@@ -61,6 +58,9 @@ func runServerMode(cfg string) {
 }
 
 func runClientMode(cfg string) {
+	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
+	config := utils.InitHostConfig(cfg)
+
 	externalCfg := utils.InitClientConfig(cfg)
 	host := "wss://" + externalCfg.Session.Host.Url + "/connect"
 	utils.LogInfo("Attempting to connect to: %s", host)
@@ -81,8 +81,19 @@ func runClientMode(cfg string) {
 		return
 	}
 
-	socket.SetClient(conn)
-	service.HandleReceiveAndProcessIncomingMessages(conn)
+	socket.SetHostConnection(conn)
+
+	if err := service.HandleCreateSnapshot(config.Application.Path); err != nil {
+		utils.LogError("Could not create/save project snapshot: %s", err.Error())
+		return
+	}
+
+	http.HandleFunc("/send-sync", api.RequestSync)
+	go service.HandleReceiveAndProcessIncomingMessages(conn)
+
+	if err := http.ListenAndServe(config.Application.Port, nil); err != nil {
+		utils.LogError(err.Error())
+	}
 
 	utils.LogWarn("Connection to host has been lost. Shutting down.")
 }

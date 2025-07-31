@@ -121,16 +121,9 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		utils.LogError("Invalid msg constructed, could not sync file %s. Error: %s", msg.Path, err.Error())
 		return
 	}
-	socket.GetClient().Conn.WriteMessage(websocket.TextMessage, msgBytes)
+	socket.GetHostConnection().WriteMessage(websocket.TextMessage, msgBytes)
 
 	w.WriteHeader(http.StatusOK)
 
 	utils.LogInfo("Sync accepted and sent to host")
-}
-
-func HeartBeat(w http.ResponseWriter, r *http.Request) {
-	utils.LogInfo("Heartbeat received")
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Heartbeat successful")
 }

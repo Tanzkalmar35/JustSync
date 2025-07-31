@@ -297,5 +297,3 @@ func applyNewFileSync(msg snapshot.WebsocketMessage_FileDelta) error {
 
 	return nil
 }
-
-// 126 }

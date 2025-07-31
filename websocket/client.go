@@ -5,7 +5,6 @@ import (
 	"JustSync/utils"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -13,8 +12,7 @@ import (
 )
 
 var (
-	client     Client
-	clientLock sync.Once
+	hostConn *websocket.Conn
 )
 
 const (
@@ -27,12 +25,12 @@ type Client struct {
 	send chan []byte
 }
 
-func SetClient(conn *websocket.Conn) {
-	client = Client{Conn: conn}
+func SetHostConnection(conn *websocket.Conn) {
+	hostConn = conn
 }
 
-func GetClient() Client {
-	return client
+func GetHostConnection() *websocket.Conn {
+	return hostConn
 }
 
 func (c *Client) readPump() {

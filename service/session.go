@@ -69,6 +69,7 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 			elapsed := time.Since(start)
 			utils.LogInfo("Successfully processed %s in %s", t.InitialFile.Path, elapsed)
 		case *snapshot.WebsocketMessage_EndSync:
+			snapshot.HandleCreateSnapshot()
 			utils.LogInfo("Finishing sync up!")
 		default:
 			utils.LogError("Recieved message of unexpected type: %T", t)
