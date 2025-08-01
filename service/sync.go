@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 )
 
 func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
@@ -175,14 +174,20 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 
 	// Pre-allocate slice capacity to avoid reallocations.
 	chunksForReconstruction := make([]reconstructionChunk, 0, len(msg.FileDelta.AddedChunks)+len(msg.FileDelta.MovedChunks))
+	var finalSize int64 = 0
 
 	// Populate the list with new chunks from the delta message.
 	for _, added := range msg.FileDelta.AddedChunks {
-		chunksForReconstruction = append(chunksForReconstruction, reconstructionChunk{
+		chunk := reconstructionChunk{
 			Checksum: added.Checksum,
 			Content:  added.Content,
 			Offset:   added.NewOffset,
-		})
+		}
+		chunksForReconstruction = append(chunksForReconstruction, chunk)
+		chunkEnd := chunk.Offset + int64(len(chunk.Content))
+		if chunkEnd > finalSize {
+			finalSize = chunkEnd
+		}
 	}
 
 	// Populate the list with moved chunks, retrieving their content from our map.
@@ -194,24 +199,24 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 			return fmt.Errorf(err, moved.Checksum)
 		}
 
-		chunksForReconstruction = append(chunksForReconstruction, reconstructionChunk{
+		chunk := reconstructionChunk{
 			Checksum: moved.Checksum,
 			Content:  content,
 			Offset:   moved.NewOffset,
-		})
+		}
+		chunksForReconstruction = append(chunksForReconstruction, chunk)
+		chunkEnd := chunk.Offset + int64(len(chunk.Content))
+		if chunkEnd > finalSize {
+			finalSize = chunkEnd
+		}
 	}
+
+	newFileContent := make([]byte, finalSize)
 
 	// Sort them according to their offset
-	sort.Slice(chunksForReconstruction, func(i, j int) bool {
-		return chunksForReconstruction[i].Offset < chunksForReconstruction[j].Offset
-	})
-
-	// Use a buffer for efficient in-memory file construction.
-	var newFileBuffer bytes.Buffer
 	for _, chunk := range chunksForReconstruction {
-		newFileBuffer.Write(chunk.Content)
+		copy(newFileContent[chunk.Offset:], chunk.Content)
 	}
-	newFileContent := newFileBuffer.Bytes()
 
 	// Verify that the reconstructed file's checksum matches the expected checksum from the delta.
 	// This guarantees the integrity of the patch operation.

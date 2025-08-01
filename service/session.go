@@ -10,6 +10,7 @@ import (
 )
 
 func HandleCreateSnapshot(path string) error {
+	utils.LogInfo("Creating new snapshot at %s", path)
 	snap, err := utils.CreateSnapshotOfDir(path)
 
 	if err != nil {
@@ -69,8 +70,8 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 			elapsed := time.Since(start)
 			utils.LogInfo("Successfully processed %s in %s", t.InitialFile.Path, elapsed)
 		case *snapshot.WebsocketMessage_EndSync:
-			snapshot.HandleCreateSnapshot()
 			utils.LogInfo("Finishing sync up!")
+			HandleCreateSnapshot(utils.GetClientConfig().Session.Path)
 		default:
 			utils.LogError("Recieved message of unexpected type: %T", t)
 		}

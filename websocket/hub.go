@@ -101,7 +101,7 @@ func (h *Hub) Run() {
 			for client := range h.Clients {
 				select {
 				case client.send <- message:
-					utils.LogInfo("Message broadcasted: %s", message)
+					utils.LogInfo("Message broadcasted")
 				default:
 					// Fall back. Close and disconnect everything in case the client's send buffer is full or it is dead or stuck
 					utils.LogError("Broadcast failed - maybe the buffer of one of the clients is full or it is dead or stuck")

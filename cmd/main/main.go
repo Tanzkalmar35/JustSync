@@ -57,12 +57,9 @@ func runServerMode(cfg string) {
 	}
 }
 
-func runClientMode(cfg string) {
-	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
-	config := utils.InitHostConfig(cfg)
-
-	externalCfg := utils.InitClientConfig(cfg)
-	host := "wss://" + externalCfg.Session.Host.Url + "/connect"
+func runClientMode(cfgName string) {
+	cfg := utils.InitClientConfig(cfgName)
+	host := "wss://" + cfg.Session.Host.Url + "/connect"
 	utils.LogInfo("Attempting to connect to: %s", host)
 
 	conn, _, err := websocket.DefaultDialer.Dial(host, nil)
@@ -75,7 +72,7 @@ func runClientMode(cfg string) {
 	utils.LogInfo("Connection to host at %s established successfully", host)
 	utils.LogInfo("Attempting authentication handshake")
 
-	err = conn.WriteMessage(websocket.TextMessage, []byte(externalCfg.Session.Client.Token))
+	err = conn.WriteMessage(websocket.TextMessage, []byte(cfg.Session.Client.Token))
 	if err != nil {
 		utils.LogError("Authentication token for handshake could not be sent: %s", err.Error())
 		return
@@ -83,15 +80,17 @@ func runClientMode(cfg string) {
 
 	socket.SetHostConnection(conn)
 
-	if err := service.HandleCreateSnapshot(config.Application.Path); err != nil {
-		utils.LogError("Could not create/save project snapshot: %s", err.Error())
-		return
-	}
+	// if err := service.HandleCreateSnapshot(cfg.Session.Path); err != nil {
+	// 	utils.LogError("Could not create/save project snapshot at %s: %s", cfg.Session.Path, err.Error())
+	// 	return
+	// }
 
 	http.HandleFunc("/send-sync", api.RequestSync)
 	go service.HandleReceiveAndProcessIncomingMessages(conn)
 
-	if err := http.ListenAndServe(config.Application.Port, nil); err != nil {
+	utils.LogInfo("Listening for sync requests on localhost port :10001")
+
+	if err := http.ListenAndServe(cfg.Session.Port, nil); err != nil {
 		utils.LogError(err.Error())
 	}
 

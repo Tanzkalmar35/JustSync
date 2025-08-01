@@ -6,8 +6,6 @@ import (
 	socket "JustSync/websocket"
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 
@@ -28,7 +26,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Getting file content
+	// Open the file for chunking.
 	file, err := os.Open(body.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -37,59 +35,75 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	content, err := io.ReadAll(file)
-	if err != nil {
-		errMsg := "An error occurred attempting to read file %s: %s"
-		utils.LogError(errMsg, file, err.Error())
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Print(w, errMsg, file, err.Error())
-	}
-
-	// Reading snapshot
-	hasher := utils.GetHasher()
-	hash := hasher(content)
-	snap := snapshot.GetSnapshot()
-
-	// Checking if changes were made
-	if bytes.Equal(hash, snap.Files[body.Path].Checksum) {
-		utils.LogInfo("Sync request rejected, no change in file detected.")
-		return
-	}
-
-	// Chunk new file content
+	// Immediately chunk the file to get the definitive list of new chunks.
 	newChunks, err := utils.ChunkFileContentDefined(file)
 	if err != nil {
 		utils.LogError("An error while chunking file '%s': %s", body.Path, err.Error())
+		http.Error(w, "Failed to chunk file", http.StatusInternalServerError)
 		return
+	}
+
+	// Reconstruct the file content FROM THE CHUNKS to get the definitive content.
+	var finalSize int64
+	for _, chunk := range newChunks {
+		chunkEnd := chunk.Offset + int64(len(chunk.Content))
+		if chunkEnd > finalSize {
+			finalSize = chunkEnd
+		}
+	}
+	reconstructedContent := make([]byte, finalSize)
+	for _, chunk := range newChunks {
+		copy(reconstructedContent[chunk.Offset:], chunk.Content)
+	}
+
+	// Calculate the checksum on this reconstructed content. This is the authoritative hash.
+	hasher := utils.GetHasher()
+	hash := hasher(reconstructedContent)
+
+	// Now, check if the file has actually changed.
+	snap := snapshot.GetSnapshot()
+	if oldFile, ok := snap.Files[body.Path]; ok {
+		if bytes.Equal(hash, oldFile.Checksum) {
+			utils.LogInfo("Sync request rejected, no change in file detected.")
+			w.WriteHeader(http.StatusOK) // Still a success, just no action needed.
+			return
+		}
 	}
 
 	// Prepare new snapshot object
 	newSnapshot := snapshot.GetSnapshot()
+	// Ensure the file entry exists in the snapshot before trying to access its chunks
+	if _, ok := newSnapshot.Files[body.Path]; !ok {
+		newSnapshot.Files[body.Path] = &snapshot.InitialSyncFile{}
+	}
 	newSnapshot.Files[body.Path].Checksum = hash
+	newSnapshot.Files[body.Path].Chunks = newChunks // Replace old chunks with the new definitive ones
 
 	// Prepare file delta calculation
 	oldChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
 	newChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
-	for _, chunk := range snap.Files[body.Path].Chunks {
-		oldChunkMap[string(chunk.Checksum)] = chunk
+	// Use the old snapshot for comparison
+	if oldFile, ok := snap.Files[body.Path]; ok {
+		for _, chunk := range oldFile.Chunks {
+			oldChunkMap[string(chunk.Checksum)] = chunk
+		}
 	}
 	for _, chunk := range newChunks {
 		newChunkMap[string(chunk.Checksum)] = chunk
-		newSnapshot.Files[body.Path].Chunks = append(newSnapshot.Files[body.Path].Chunks, chunk)
 	}
 
 	snapshot.WriteSnapshot(newSnapshot)
 
 	msg := snapshot.FileDelta{
 		Path:               body.Path,
-		Checksum:           hash,
+		Checksum:           hash, // Use the authoritative hash
 		AddedChunks:        []*snapshot.AddedChunk{},
 		MovedChunks:        []*snapshot.MovedChunk{},
 		RemovedChunkHashes: [][]byte{},
 	}
 
-	for _, newChunk := range newChunkMap {
-		if oldChunk, exists := oldChunkMap[string(newChunk.Checksum)]; !exists {
+	for newChunkHash, newChunk := range newChunkMap {
+		if oldChunk, exists := oldChunkMap[newChunkHash]; !exists {
 			// Chunk added
 			msg.AddedChunks = append(msg.AddedChunks, &snapshot.AddedChunk{
 				Checksum:  newChunk.Checksum,
@@ -105,9 +119,9 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for hash := range oldChunkMap {
-		if _, exists := newChunkMap[hash]; !exists {
-			msg.RemovedChunkHashes = append(msg.RemovedChunkHashes, []byte(hash))
+	for oldChunkHash := range oldChunkMap {
+		if _, exists := newChunkMap[oldChunkHash]; !exists {
+			msg.RemovedChunkHashes = append(msg.RemovedChunkHashes, []byte(oldChunkHash))
 		}
 	}
 
@@ -121,7 +135,9 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		utils.LogError("Invalid msg constructed, could not sync file %s. Error: %s", msg.Path, err.Error())
 		return
 	}
-	socket.GetHostConnection().WriteMessage(websocket.TextMessage, msgBytes)
+	if err := socket.GetHostConnection().WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		utils.LogError("Failed to send sync message to host: %s", err.Error())
+	}
 
 	w.WriteHeader(http.StatusOK)
 
