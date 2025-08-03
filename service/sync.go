@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
@@ -87,20 +88,25 @@ func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 
 func PrepareReceiveProjectSync() error {
 	cfg := utils.GetClientConfig()
-	path := cfg.Session.Path + cfg.Session.Name
+	path := filepath.Join(cfg.Session.Path, cfg.Session.Name)
 
-	_, err := os.Stat(cfg.Session.Path)
+	// Check if destination path already exists
+	_, err := os.Stat(path)
 	if err == nil {
-		utils.LogError("Folder with name %s already existing at %s", cfg.Session.Name, cfg.Session.Path)
-		return err
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		utils.LogError("Something went wrong validating project path: %s", err.Error())
+		err := fmt.Errorf("Folder with name '%s' already exists at '%s'", cfg.Session.Name, cfg.Session.Path)
+		utils.LogError(err.Error())
 		return err
 	}
 
-	if err := os.Mkdir(path, 0755); err != nil {
-		utils.LogError("Could not create directory %s at %s", cfg.Session.Name, cfg.Session.Path)
+	// If the error is anything other than "not exist", it's an unexpected problem (e.g., permissions).
+	if !errors.Is(err, fs.ErrNotExist) {
+		utils.LogError("Something went wrong validating project path '%s': %s", path, err.Error())
+		return err
+	}
+
+	// The directory does not exist, so create it.
+	if err := os.MkdirAll(path, 0755); err != nil {
+		utils.LogError("Could not create directory '%s': %s", path, err.Error())
 		return err
 	}
 
@@ -124,6 +130,7 @@ func ProcessNewFileSync(msg snapshot.WebsocketMessage_InitialFile) error {
 		utils.LogError("Could not create file %s due to error: %s", path, err.Error())
 		return err
 	}
+	defer file.Close()
 
 	// Fill the file with the actual content
 	totalWrittenBytes := 0
@@ -144,6 +151,9 @@ func ProcessNewFileSync(msg snapshot.WebsocketMessage_InitialFile) error {
 
 // ApplyFileDelta reconstructs a file based on a delta message.
 func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
+	cfg := utils.GetClientConfig()
+	absolutePath := filepath.Join(cfg.Session.Path, cfg.Session.Name, msg.FileDelta.Path)
+
 	oldSnapshotFile, ok := snapshot.GetSnapshot().Files[msg.FileDelta.Path]
 	if !ok {
 		// File does not appear in local register, must have been added by remote
@@ -151,6 +161,7 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 			utils.LogError(err.Error())
 			return err
 		}
+		return nil
 	}
 
 	if bytes.Equal(oldSnapshotFile.Checksum, msg.FileDelta.Checksum) {
@@ -211,6 +222,37 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 		}
 	}
 
+	// Identify unchanged chunks and add them to the reconstruction list.
+	// An unchanged chunk is one that exists in the old snapshot and is not marked as moved or removed.
+	movedOrRemovedHashes := make(map[string]bool)
+	for _, moved := range msg.FileDelta.MovedChunks {
+		movedOrRemovedHashes[string(moved.Checksum)] = true
+	}
+	for _, removed := range msg.FileDelta.RemovedChunkHashes {
+		movedOrRemovedHashes[string(removed)] = true
+	}
+
+	for _, oldChunk := range oldSnapshotFile.Chunks {
+		if _, isMovedOrRemoved := movedOrRemovedHashes[string(oldChunk.Checksum)]; !isMovedOrRemoved {
+			// This chunk is unchanged, add it to the reconstruction list.
+			chunk := reconstructionChunk{
+				Checksum: oldChunk.Checksum,
+				Content:  oldChunk.Content,
+				Offset:   oldChunk.Offset, // It keeps its original offset
+			}
+			chunksForReconstruction = append(chunksForReconstruction, chunk)
+			// Also update finalSize with this chunk
+			chunkEnd := chunk.Offset + int64(len(chunk.Content))
+			if chunkEnd > finalSize {
+				finalSize = chunkEnd
+			}
+		}
+	}
+
+	// Sort chunks by offset before reconstruction
+	sort.Slice(chunksForReconstruction, func(i, j int) bool {
+		return chunksForReconstruction[i].Offset < chunksForReconstruction[j].Offset
+	})
 	newFileContent := make([]byte, finalSize)
 
 	// Sort them according to their offset
@@ -222,13 +264,23 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 	// This guarantees the integrity of the patch operation.
 	hasher := utils.GetHasher()
 	calculatedChecksum := hasher(newFileContent)
+
+	// --- START DEBUG LOGGING ---
+	utils.LogDebug("------ Applying Delta for: %s ------", msg.FileDelta.Path)
+	utils.LogDebug("Final calculated size: %d bytes", finalSize)
+	utils.LogDebug("Number of chunks for reconstruction: %d", len(chunksForReconstruction))
+	utils.LogDebug("Expected checksum: %x", msg.FileDelta.Checksum)
+	utils.LogDebug("Calculated checksum: %x", calculatedChecksum)
+	utils.LogDebug("Checksums are equal: %t", bytes.Equal(calculatedChecksum, msg.FileDelta.Checksum))
+	utils.LogDebug("-------------------------------------------------")
+	// --- END DEBUG LOGGING ---
+
 	if !bytes.Equal(calculatedChecksum, msg.FileDelta.Checksum) {
 		return fmt.Errorf("checksum mismatch after applying delta for %s. Aborting.", msg.FileDelta.Path)
 	}
 
-	// --- 5. Write to Disk and Update Snapshot ---
 	// The new content is verified. Now, write it to the filesystem.
-	if err := os.WriteFile(msg.FileDelta.Path, newFileContent, 0644); err != nil {
+	if err := os.WriteFile(absolutePath, newFileContent, 0644); err != nil {
 		return fmt.Errorf("failed to write updated file %s: %w", msg.FileDelta.Path, err)
 	}
 
@@ -239,9 +291,14 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 		newSnapshotChunks[i] = &snapshot.InitialSyncChunk{
 			Checksum: chunk.Checksum,
 			Content:  chunk.Content,
+			Offset:   chunk.Offset,
 			Size:     int64(len(chunk.Content)),
 		}
 	}
+
+	sort.Slice(newSnapshotChunks, func(i, j int) bool {
+		return newSnapshotChunks[i].Offset < newSnapshotChunks[j].Offset
+	})
 
 	// Write new snapshot
 	oldSnapshot := snapshot.GetSnapshot()
@@ -257,6 +314,9 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 
 // applyNewFileSync applies sync requests containing new files that the local register does not have.
 func applyNewFileSync(msg snapshot.WebsocketMessage_FileDelta) error {
+	cfg := utils.GetClientConfig()
+	absolutePath := filepath.Join(cfg.Session.Path, cfg.Session.Name, msg.FileDelta.Path)
+
 	if len(msg.FileDelta.MovedChunks) != 0 || len(msg.FileDelta.RemovedChunkHashes) != 0 {
 		// We received a file delta, that we don't have any record of existing.
 		// This should not happen.
@@ -266,7 +326,7 @@ func applyNewFileSync(msg snapshot.WebsocketMessage_FileDelta) error {
 	}
 
 	// A valid new file was created, copy that
-	file, err := os.Create(msg.FileDelta.Path)
+	file, err := os.Create(absolutePath)
 	if err != nil {
 		utils.LogError("Could not create file %s due to error: %s", msg.FileDelta.Path, err.Error())
 		return err

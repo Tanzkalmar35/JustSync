@@ -80,11 +80,6 @@ func runClientMode(cfgName string) {
 
 	socket.SetHostConnection(conn)
 
-	// if err := service.HandleCreateSnapshot(cfg.Session.Path); err != nil {
-	// 	utils.LogError("Could not create/save project snapshot at %s: %s", cfg.Session.Path, err.Error())
-	// 	return
-	// }
-
 	http.HandleFunc("/send-sync", api.RequestSync)
 	go service.HandleReceiveAndProcessIncomingMessages(conn)
 

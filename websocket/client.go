@@ -11,20 +11,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var (
-	hostConn *websocket.Conn
-)
+var hostConn *websocket.Conn
 
 const (
 	handshakeWait = 5 * time.Second
-	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
 )
 
 type Client struct {
@@ -46,8 +36,6 @@ func (c *Client) readPump() {
 		c.hub.unregister <- c
 		c.Conn.Close()
 	}()
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.Conn.SetPongHandler(func(string) error { c.Conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
 		_, msg, err := c.Conn.ReadMessage()
@@ -62,16 +50,10 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	ticker := time.NewTicker(pingPeriod)
-	defer func() {
-		ticker.Stop()
-		c.Conn.Close()
-	}()
-
+	defer c.Conn.Close()
 	for {
 		select {
 		case msg, ok := <-c.send:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
 					utils.LogError("Error writing close message to peer.")
@@ -79,11 +61,6 @@ func (c *Client) writePump() {
 				return
 			}
 			c.Conn.WriteMessage(websocket.TextMessage, msg)
-		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
 		}
 	}
 }

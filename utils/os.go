@@ -78,6 +78,12 @@ func CreateSnapshotOfFile(path string) (snapshot.InitialSyncFile, error) {
 	// Hash whole content
 	snap.Checksum = GetHasher()(content)
 
+	// Reset the file pointer to the beginning of the file before chunking
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return snap, fmt.Errorf("failed to seek file: %w", err)
+	}
+
 	// Split into chunks and hash these
 	chunkHashes, err := ChunkFileContentDefined(file)
 	if err != nil {

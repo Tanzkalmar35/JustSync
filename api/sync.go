@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
@@ -27,42 +28,39 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open the file for chunking.
-	file, err := os.Open(body.Path)
+	fileContent, err := os.ReadFile(body.Path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		utils.LogError("Could not read file data: %s", err.Error())
 		return
 	}
-	defer file.Close()
+
+	// Convert the absolute path to a relative path against the project root.
+	cfg := utils.GetClientConfig()
+	projectRoot := filepath.Join(cfg.Session.Path, cfg.Session.Name)
+	relativePath, err := filepath.Rel(projectRoot, body.Path)
+	if err != nil {
+		http.Error(w, "Failed to create relative path", http.StatusInternalServerError)
+		utils.LogError("Could not make path '%s' relative to '%s': %s", body.Path, projectRoot, err.Error())
+		return
+	}
 
 	// Immediately chunk the file to get the definitive list of new chunks.
-	newChunks, err := utils.ChunkFileContentDefined(file)
+	reader := bytes.NewReader(fileContent)
+	newChunks, err := utils.ChunkFileContentDefined(reader)
 	if err != nil {
 		utils.LogError("An error while chunking file '%s': %s", body.Path, err.Error())
 		http.Error(w, "Failed to chunk file", http.StatusInternalServerError)
 		return
 	}
 
-	// Reconstruct the file content FROM THE CHUNKS to get the definitive content.
-	var finalSize int64
-	for _, chunk := range newChunks {
-		chunkEnd := chunk.Offset + int64(len(chunk.Content))
-		if chunkEnd > finalSize {
-			finalSize = chunkEnd
-		}
-	}
-	reconstructedContent := make([]byte, finalSize)
-	for _, chunk := range newChunks {
-		copy(reconstructedContent[chunk.Offset:], chunk.Content)
-	}
-
 	// Calculate the checksum on this reconstructed content. This is the authoritative hash.
 	hasher := utils.GetHasher()
-	hash := hasher(reconstructedContent)
+	hash := hasher(fileContent)
 
 	// Now, check if the file has actually changed.
 	snap := snapshot.GetSnapshot()
-	if oldFile, ok := snap.Files[body.Path]; ok {
+	if oldFile, ok := snap.Files[relativePath]; ok {
 		if bytes.Equal(hash, oldFile.Checksum) {
 			utils.LogInfo("Sync request rejected, no change in file detected.")
 			w.WriteHeader(http.StatusOK) // Still a success, just no action needed.
@@ -70,33 +68,24 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Prepare new snapshot object
-	newSnapshot := snapshot.GetSnapshot()
-	// Ensure the file entry exists in the snapshot before trying to access its chunks
-	if _, ok := newSnapshot.Files[body.Path]; !ok {
-		newSnapshot.Files[body.Path] = &snapshot.InitialSyncFile{}
-	}
-	newSnapshot.Files[body.Path].Checksum = hash
-	newSnapshot.Files[body.Path].Chunks = newChunks // Replace old chunks with the new definitive ones
-
 	// Prepare file delta calculation
 	oldChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
 	newChunkMap := make(map[string]*snapshot.InitialSyncChunk) // hash -> Chunk
-	// Use the old snapshot for comparison
-	if oldFile, ok := snap.Files[body.Path]; ok {
+
+	// Populate the old chunk map from the unmodified snapshot.
+	if oldFile, ok := snap.Files[relativePath]; ok {
 		for _, chunk := range oldFile.Chunks {
 			oldChunkMap[string(chunk.Checksum)] = chunk
 		}
 	}
+	// Populate the new chunk map from the chunks we just generated.
 	for _, chunk := range newChunks {
 		newChunkMap[string(chunk.Checksum)] = chunk
 	}
 
-	snapshot.WriteSnapshot(newSnapshot)
-
 	msg := snapshot.FileDelta{
-		Path:               body.Path,
-		Checksum:           hash, // Use the authoritative hash
+		Path:               relativePath,
+		Checksum:           hash,
 		AddedChunks:        []*snapshot.AddedChunk{},
 		MovedChunks:        []*snapshot.MovedChunk{},
 		RemovedChunkHashes: [][]byte{},

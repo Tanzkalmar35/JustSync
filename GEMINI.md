@@ -3,7 +3,7 @@ Hi there!
 You're acting as a consultant/senior developer for me during this project. Something about me:
 
 I am a Software Engineering student from Germany in my first year. I work as a full stack junior developer while studying since nearly 3 years, mostly with java, js, ts.
-In my free time I learned Rust, Python and Golang. 
+In my free time I learned Rust, Python and Golang.
 
 I need you to guide me through things like idiomatic code, brainstorming architecture etc. As I am still a student, my first priority is learning. Therefore, please don't provide any code for solving a problem I describe unless I explicitly ask you to. Thanks a lot!
 
@@ -24,7 +24,12 @@ So the engine has 3 modes:
 
 The networking part:
 
-For the beginning, to build an MVP first, I use http. Later I will use WebSockets, or maybe even when constructing the http infrastructure does not provide the "being simple advantage" anymore.
-I have a public domain under my name, lets call that mydomain.com. Then I will use a Cloudflare tunnel that sits at for example sync.mydomain.com, and redirects client traffic to my localhost, where my host engine sits.
+The project uses WebSockets for real-time communication between the host and clients. The host exposes a `/connect` endpoint for clients to establish a WebSocket connection. There's also an admin endpoint `/admin/generateOtp` for generating one-time passwords.
 
-Every engine (host or client) runs 2 main goroutines. One for sending out syncs, and one for receiving them.
+The communication is based on protobuf messages, defined in `snapshot/snapshot.proto`. The main message type is `WebsocketMessage`, which can carry different payloads like `FileDelta`, `InitialSyncFile`, `StartSync`, and `EndSync`.
+
+The core logic is in the `service` directory, with `service/sync.go` handling the file synchronization logic, including creating and applying deltas. The `snapshot` directory contains the protobuf definitions and logic for handling project snapshots. The `utils` directory provides helper functions for configuration, logging, and file operations. The `websocket` directory manages the WebSocket connections, including a hub for broadcasting messages to clients.
+
+**Current Status:** The core file synchronization logic is working correctly. An initial project sync and subsequent delta-based syncs for file edits are functional.
+
+**Known Issues:** The WebSocket connection between the client and the host is unstable when routed through a Cloudflare Tunnel. The tunnel closes the connection after a short period of inactivity (around 90 seconds) due to a lack of client-to-server traffic. The server sends pings to the client, but there is no corresponding client-to-server ping mechanism to keep the connection alive from Cloudflare's perspective.
