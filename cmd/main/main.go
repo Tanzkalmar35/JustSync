@@ -81,6 +81,7 @@ func runClientMode(cfgName string) {
 	socket.SetHostConnection(conn)
 
 	http.HandleFunc("/send-sync", api.RequestSync)
+	go service.KeepClientAlive(conn)
 	go service.HandleReceiveAndProcessIncomingMessages(conn)
 
 	utils.LogInfo("Listening for sync requests on localhost port :10001")

@@ -14,7 +14,8 @@ import (
 )
 
 func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
-	projectRoot := utils.GetHostConfig().Application.Path
+	config := utils.GetHostConfig()
+	projectRoot := config.Application.Path
 	var messages []snapshot.WebsocketMessage
 	// Append start sync msg
 	startSyncMsg := snapshot.WebsocketMessage_StartSync{}
@@ -32,18 +33,24 @@ func PrepareInitiateProjectSync() ([]snapshot.WebsocketMessage, error) {
 			return nil
 		}
 
+		relativePath, err := filepath.Rel(projectRoot, absolutePath)
+		if err != nil {
+			utils.LogError("Could not shrink the absolute path to be relative due to: %s", err.Error())
+			return err
+		}
+
+		for _, ignoredPath := range config.Application.IgnoredFiles {
+			if relativePath == ignoredPath {
+				return nil
+			}
+		}
+
 		file, err := os.Open(absolutePath)
 		if err != nil {
 			utils.LogError("Error reading file at %s: %s", absolutePath, err.Error())
 			return err
 		}
 		defer file.Close()
-
-		relativePath, err := filepath.Rel(projectRoot, absolutePath)
-		if err != nil {
-			utils.LogError("Could not shrink the absolute path to be relative due to: %s", err.Error())
-			return err
-		}
 
 		fileChunks, err := utils.ChunkFileContentDefined(file)
 		if err != nil {
@@ -145,7 +152,7 @@ func ProcessNewFileSync(msg snapshot.WebsocketMessage_InitialFile) error {
 	}
 
 	// Check content checksum
-	utils.LogInfo("Wrote %b bytes to %s", totalWrittenBytes, msg.InitialFile.Path)
+	utils.LogDebug("Wrote %b bytes to %s", totalWrittenBytes, msg.InitialFile.Path)
 	return nil
 }
 

@@ -68,12 +68,26 @@ func HandleReceiveAndProcessIncomingMessages(conn *websocket.Conn) {
 				utils.LogError("Could not process file sync of file '%s' due to %s", t.InitialFile.Path, err.Error())
 			}
 			elapsed := time.Since(start)
-			utils.LogInfo("Successfully processed %s in %s", t.InitialFile.Path, elapsed)
+			utils.LogDebug("Successfully processed %s in %s", t.InitialFile.Path, elapsed)
 		case *snapshot.WebsocketMessage_EndSync:
 			utils.LogInfo("Finishing sync up!")
 			HandleCreateSnapshot(utils.GetClientConfig().Session.Path)
 		default:
 			utils.LogError("Recieved message of unexpected type: %T", t)
+		}
+	}
+}
+
+// CLIENT: Send keep-alive ping signals to the server
+func KeepClientAlive(conn *websocket.Conn) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		utils.LogInfo("Pinging host")
+		if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			utils.LogError("Could not send ping to host...")
+			return
 		}
 	}
 }

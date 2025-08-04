@@ -10,23 +10,24 @@ type RunMode string
 
 type ExternalClientConfig struct {
 	Session struct {
-		Port string `yml:"port"`
-		Name string `yml:"name"`
-		Path string `yml:"path"`
+		Port string `yaml:"port"`
+		Name string `yaml:"name"`
+		Path string `yaml:"path"`
 		Host struct {
-			Url string `yml:"url"`
+			Url string `yaml:"url"`
 		}
 		Client struct {
-			Name  string `yml:"name"`
-			Token string `yml:"token"`
+			Name  string `yaml:"name"`
+			Token string `yaml:"token"`
 		}
 	}
 }
 
 type ExternalHostConfig struct {
 	Application struct {
-		Port string
-		Path string
+		Port         string   `yaml:"port"`
+		Path         string   `yaml:"path"`
+		IgnoredFiles []string `yaml:"ignoredFiles"`
 	}
 }
 

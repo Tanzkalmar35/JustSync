@@ -15,6 +15,7 @@ var hostConn *websocket.Conn
 
 const (
 	handshakeWait = 5 * time.Second
+	pingInterval  = 60 * time.Second
 )
 
 type Client struct {
@@ -50,7 +51,11 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	defer c.Conn.Close()
+	ticker := time.NewTicker(pingInterval)
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
 	for {
 		select {
 		case msg, ok := <-c.send:
@@ -61,6 +66,12 @@ func (c *Client) writePump() {
 				return
 			}
 			c.Conn.WriteMessage(websocket.TextMessage, msg)
+		case <-ticker.C:
+			utils.LogInfo("Pinging client")
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				utils.LogError("Could not send ping message to client")
+				return
+			}
 		}
 	}
 }
