@@ -30,6 +30,12 @@ The communication is based on protobuf messages, defined in `snapshot/snapshot.p
 
 The core logic is in the `service` directory, with `service/sync.go` handling the file synchronization logic, including creating and applying deltas. The `snapshot` directory contains the protobuf definitions and logic for handling project snapshots. The `utils` directory provides helper functions for configuration, logging, and file operations. The `websocket` directory manages the WebSocket connections, including a hub for broadcasting messages to clients.
 
-**Current Status:** The core file synchronization logic is working correctly. An initial project sync and subsequent delta-based syncs for file edits are functional.
+**Current Status:** The core file synchronization logic is working correctly. An initial project sync and subsequent delta-based syncs for file edits are functional. A client-to-server ping mechanism has been implemented to keep the WebSocket connection alive when routed through a Cloudflare Tunnel.
 
-**Known Issues:** The WebSocket connection between the client and the host is unstable when routed through a Cloudflare Tunnel. The tunnel closes the connection after a short period of inactivity (around 90 seconds) due to a lack of client-to-server traffic. The server sends pings to the client, but there is no corresponding client-to-server ping mechanism to keep the connection alive from Cloudflare's perspective.
+**Configuration:**
+
+The host application can be configured using a YAML file. The configuration file supports the following options:
+
+- `Application.port`: The port on which the server will listen for connections.
+- `Application.path`: The absolute path to the project directory to be synced.
+- `Application.ignoredFiles`: A list of files and directories to be excluded from the initial project sync.
