@@ -54,7 +54,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Calculate the checksum on this reconstructed content. This is the authoritative hash.
+	// Calculate the checksum on this reconstructed content.
 	hasher := utils.GetHasher()
 	hash := hasher(fileContent)
 
@@ -98,12 +98,14 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 				Checksum:  newChunk.Checksum,
 				Content:   newChunk.Content,
 				NewOffset: newChunk.Offset,
+				Version:   oldChunk.Version + 1,
 			})
 		} else if oldChunk.Offset != newChunk.Offset {
 			// Chunk moved
 			msg.MovedChunks = append(msg.MovedChunks, &snapshot.MovedChunk{
 				Checksum:  newChunk.Checksum,
 				NewOffset: newChunk.Offset,
+				Version:   oldChunk.Version + 1,
 			})
 		}
 	}

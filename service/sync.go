@@ -177,8 +177,14 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 		return nil
 	}
 
-	oldChunkMap := make(map[[32]byte][]byte)
-	for _, chunk := range oldSnapshotFile.Chunks {
+	oldChunkMap := make(map[[32]byte][]byte) // hash -> content
+	for idx, chunk := range oldSnapshotFile.Chunks {
+		if msg.FileDelta.AddedChunks[idx].Version != chunk.Version+1 {
+			// TODO: Auto-merge
+			utils.LogWarn("Found colliding chunks in file %s. Attempting auto-merge", msg.FileDelta.Path)
+			return nil
+		}
+
 		var checksum [32]byte
 		copy(checksum[:], chunk.Checksum)
 		oldChunkMap[checksum] = chunk.Content
@@ -188,6 +194,7 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 		Checksum []byte
 		Content  []byte
 		Offset   int64
+		Version  int64
 	}
 
 	// Pre-allocate slice capacity to avoid reallocations.
@@ -200,6 +207,7 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 			Checksum: added.Checksum,
 			Content:  added.Content,
 			Offset:   added.NewOffset,
+			Version:  added.Version,
 		}
 		chunksForReconstruction = append(chunksForReconstruction, chunk)
 		chunkEnd := chunk.Offset + int64(len(chunk.Content))
@@ -271,16 +279,6 @@ func ApplyFileDelta(msg snapshot.WebsocketMessage_FileDelta) error {
 	// This guarantees the integrity of the patch operation.
 	hasher := utils.GetHasher()
 	calculatedChecksum := hasher(newFileContent)
-
-	// --- START DEBUG LOGGING ---
-	utils.LogDebug("------ Applying Delta for: %s ------", msg.FileDelta.Path)
-	utils.LogDebug("Final calculated size: %d bytes", finalSize)
-	utils.LogDebug("Number of chunks for reconstruction: %d", len(chunksForReconstruction))
-	utils.LogDebug("Expected checksum: %x", msg.FileDelta.Checksum)
-	utils.LogDebug("Calculated checksum: %x", calculatedChecksum)
-	utils.LogDebug("Checksums are equal: %t", bytes.Equal(calculatedChecksum, msg.FileDelta.Checksum))
-	utils.LogDebug("-------------------------------------------------")
-	// --- END DEBUG LOGGING ---
 
 	if !bytes.Equal(calculatedChecksum, msg.FileDelta.Checksum) {
 		return fmt.Errorf("checksum mismatch after applying delta for %s. Aborting.", msg.FileDelta.Path)

@@ -75,6 +75,12 @@ func CreateSnapshotOfFile(path string) (snapshot.InitialSyncFile, error) {
 		return snap, err
 	}
 
+	isInitial := true
+	oldSnapshot := snapshot.GetSnapshot()
+	if len(oldSnapshot.Files) > 0 {
+		isInitial = false
+	}
+
 	// Hash whole content
 	snap.Checksum = GetHasher()(content)
 
@@ -85,12 +91,26 @@ func CreateSnapshotOfFile(path string) (snapshot.InitialSyncFile, error) {
 	}
 
 	// Split into chunks and hash these
-	chunkHashes, err := ChunkFileContentDefined(file)
+	chunks, err := ChunkFileContentDefined(file)
 	if err != nil {
 		return snap, err
 	}
 
-	snap.Chunks = chunkHashes
+	// Take versions from old snapshot if existing, assign version 1 if not
+	// TODO: Find a better solution
+	for _, chunk := range chunks {
+		if isInitial {
+			chunk.Version = 1
+		} else {
+			for _, oldChunk := range oldSnapshot.Files[path].Chunks {
+				if oldChunk.Offset == chunk.Offset {
+					chunk.Version = oldChunk.Version
+				}
+			}
+		}
+	}
+
+	snap.Chunks = chunks
 
 	LogDebug(strconv.Itoa(len(snap.Chunks)))
 	return snap, nil

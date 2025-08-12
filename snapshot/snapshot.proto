@@ -47,12 +47,14 @@ message AddedChunk {
   bytes checksum = 1;
   bytes content = 2;
   int64 new_offset = 3;
+  int64 version = 4;
 }
 
 // Describes the new position for an existing chunk.
 message MovedChunk {
   bytes checksum = 1;
   int64 new_offset = 2;
+  int64 version = 3;
 }
 
 message StartProjectSync {}
@@ -82,11 +84,11 @@ message InitialSyncChunk {
   bytes content = 2;
   // The offset of the chunk from the beginning of the file
   int64 offset = 3;
-  // Teh size of the chunk in bytes
+  // The size of the chunk in bytes
   int64 size = 4;
+  // The change version of the chunk. Used for contructing snapshots mid-session
+  int64 version = 5;
 }
-
-// --------------------------------------------- Inital sync
 
 message ProjectSnapshot {
   map<string, InitialSyncFile> files = 1; // path -> file
