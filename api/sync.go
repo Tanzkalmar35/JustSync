@@ -98,7 +98,7 @@ func RequestSync(w http.ResponseWriter, r *http.Request) {
 				Checksum:  newChunk.Checksum,
 				Content:   newChunk.Content,
 				NewOffset: newChunk.Offset,
-				Version:   oldChunk.Version + 1,
+				Version:   1,
 			})
 		} else if oldChunk.Offset != newChunk.Offset {
 			// Chunk moved

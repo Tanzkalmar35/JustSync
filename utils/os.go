@@ -75,10 +75,10 @@ func CreateSnapshotOfFile(path string) (snapshot.InitialSyncFile, error) {
 		return snap, err
 	}
 
-	isInitial := true
+	isInitial := false
 	oldSnapshot := snapshot.GetSnapshot()
-	if len(oldSnapshot.Files) > 0 {
-		isInitial = false
+	if oldSnapshot == nil || oldSnapshot.Files == nil {
+		isInitial = true
 	}
 
 	// Hash whole content
