@@ -10,10 +10,12 @@ type RunMode string
 
 type ExternalClientConfig struct {
 	Session struct {
-		Port string `yaml:"port"`
-		Name string `yaml:"name"`
-		Path string `yaml:"path"`
-		Host struct {
+		Port            string   `yaml:"port"`
+		Name            string   `yaml:"name"`
+		PathToCloneTo   string   `yaml:"path"`
+		PathToCloneFrom string   `yaml:"path"`
+		IgnoredFiles    []string `yaml:"ignoredFiles"`
+		Host            struct {
 			Url string `yaml:"url"`
 		}
 		Client struct {
@@ -25,9 +27,7 @@ type ExternalClientConfig struct {
 
 type ExternalHostConfig struct {
 	Application struct {
-		Port         string   `yaml:"port"`
-		Path         string   `yaml:"path"`
-		IgnoredFiles []string `yaml:"ignoredFiles"`
+		Port string `yaml:"port"`
 	}
 }
 
