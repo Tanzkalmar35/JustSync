@@ -1,7 +1,7 @@
 package websocket
 
 import (
-	"JustSync/utils"
+	"JustSync/pkg"
 	"net/http"
 	"slices"
 	"strconv"
@@ -35,39 +35,39 @@ func CheckOrigin(r *http.Request) bool {
 		return true
 	}
 
-	utils.LogWarn("Connection attempt from not whitelisted url: %s", origin)
+	pkg.LogWarn("Connection attempt from not whitelisted url: %s", origin)
 	return false
 }
 
 type Hub struct {
-	Clients   map[*Client]bool
+	Peers     map[*Peer]bool
 	Broadcast chan []byte
 
-	register   chan *Client
-	unregister chan *Client
+	register   chan *Peer
+	unregister chan *Peer
 	mu         sync.RWMutex
 }
 
 func GetHub() *Hub {
 	once.Do(func() {
 		instance = &Hub{
-			Clients:   make(map[*Client]bool),
+			Peers:     make(map[*Peer]bool),
 			Broadcast: make(chan []byte),
 
-			register:   make(chan *Client),
-			unregister: make(chan *Client),
+			register:   make(chan *Peer),
+			unregister: make(chan *Peer),
 		}
-		utils.LogInfo("Starting hub")
+		pkg.LogInfo("Starting hub")
 		go instance.Run()
 	})
 
 	return instance
 }
 
-func (h *Hub) isRegistered(client *Client) bool {
+func (h *Hub) isRegistered(client *Peer) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	_, ok := h.Clients[client]
+	_, ok := h.Peers[client]
 	return ok
 }
 
@@ -78,35 +78,35 @@ func (h *Hub) Run() {
 		// Register client
 		case client := <-h.register:
 			h.mu.Lock()
-			h.Clients[client] = true
-			utils.LogInfo("Registered client %s", strconv.Itoa(len(h.Clients)))
+			h.Peers[client] = true
+			pkg.LogInfo("Registered client %s", strconv.Itoa(len(h.Peers)))
 			h.mu.Unlock()
 
 		// Unregister client
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.Clients[client]; ok {
-				delete(h.Clients, client)
+			if _, ok := h.Peers[client]; ok {
+				delete(h.Peers, client)
 				close(client.send)
-				utils.LogInfo("Unregistered client")
+				pkg.LogInfo("Unregistered client")
 			} else {
-				utils.LogError("Error while unregistering client")
+				pkg.LogError("Error while unregistering client")
 			}
 			h.mu.Unlock()
 
 		// Message received, broadcast it to all clients
 		case message := <-h.Broadcast:
-			utils.LogInfo("Broadcasting message")
+			pkg.LogInfo("Broadcasting message")
 			h.mu.Lock()
-			for client := range h.Clients {
+			for client := range h.Peers {
 				select {
 				case client.send <- message:
-					utils.LogInfo("Message broadcasted")
+					pkg.LogInfo("Message broadcasted")
 				default:
 					// Fall back. Close and disconnect everything in case the client's send buffer is full or it is dead or stuck
-					utils.LogError("Broadcast failed - maybe the buffer of one of the clients is full or it is dead or stuck")
+					pkg.LogError("Broadcast failed - maybe the buffer of one of the clients is full or it is dead or stuck")
 					close(client.send)
-					delete(h.Clients, client)
+					delete(h.Peers, client)
 				}
 			}
 			h.mu.Unlock()

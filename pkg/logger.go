@@ -1,4 +1,4 @@
-package utils
+package pkg
 
 import (
 	"fmt"
@@ -54,9 +54,8 @@ func log(level LogLevel, color, format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 
 	logEntry := fmt.Sprintf(
-		"[%s] [%s] %s [%s] \033[0m %s\n",
+		"[%s] %s [%s] \033[0m %s\n",
 		timestamp,
-		GetMode().String(),
 		color,
 		levelName,
 		message,

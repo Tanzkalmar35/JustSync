@@ -2,7 +2,9 @@ package main
 
 import (
 	"JustSync/api"
-	"JustSync/utils"
+	"JustSync/service"
+	"JustSync/utils_old"
+	socket "JustSync/websocket"
 	"bufio"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +43,7 @@ var (
 		Short: "Run the peer as host mode",
 		Long:  "The longer version, TODO",
 		Run: func(cmd *cobra.Command, args []string) {
-			// TODO:
+			runPeer(peerCfgFile)
 		},
 	}
 	joinCmd = &cobra.Command{
@@ -48,7 +51,15 @@ var (
 		Short: "Joins a running session as plain peer",
 		Long:  "The longer version, TODO",
 		Run: func(cmd *cobra.Command, args []string) {
-			// TODO:
+			runPeer(peerCfgFile)
+		},
+	}
+	adminCmd = &cobra.Command{
+		Use:   "admin",
+		Short: "Runs the application's admin console",
+		Long:  "The longer version, TODO",
+		Run: func(cmd *cobra.Command, args []string) {
+			runAdmin()
 		},
 	}
 )
@@ -60,8 +71,7 @@ func Execute() {
 	}
 }
 
-func init() {
-
+func Init() {
 	// Register server command
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.PersistentFlags().StringVar(&serverCfgFile, "config", "", "config file (required)")
@@ -79,63 +89,56 @@ func init() {
 	peerCmd.AddCommand(joinCmd)
 	joinCmd.PersistentFlags().StringVar(&peerCfgFile, "config", "", "config file (required)")
 	joinCmd.MarkPersistentFlagRequired("config")
+
+	// Register admin command
+	rootCmd.AddCommand(adminCmd)
 }
 
 func main() {
+	Init()
 	Execute()
 }
 
 func runServer(cfg string) {
-	utils.CreateConfigFolderAt(utils.GetOsSpecificConfigPath())
-	config := utils.InitHostConfig(cfg)
-
-	http.HandleFunc("/connect", api.HandleConnectClient)
-	http.HandleFunc("/admin/generateOtp", api.HandleGenerateOtp)
-
-	utils.LogInfo("Server running at port %s", config.Application.Port)
-
-	if err := http.ListenAndServe(config.Application.Port, nil); err != nil {
-		utils.LogError(err.Error())
-	}
 }
 
-// func runPeer(cfgName string) {
-// 	cfg := utils.InitClientConfig(cfgName)
-// 	host := "wss://" + cfg.Session.Host.Url + "/connect"
-// 	utils.LogInfo("Attempting to connect to: %s", host)
-//
-// 	conn, _, err := websocket.DefaultDialer.Dial(host, nil)
-// 	if err != nil {
-// 		utils.LogError("Could not dial %s due to error: %s", host, err.Error())
-// 		return
-// 	}
-// 	defer conn.Close()
-//
-// 	utils.LogInfo("Connection to host at %s established successfully", host)
-// 	utils.LogInfo("Attempting authentication handshake")
-//
-// 	err = conn.WriteMessage(websocket.TextMessage, []byte(cfg.Session.Client.Token))
-// 	if err != nil {
-// 		utils.LogError("Authentication token for handshake could not be sent: %s", err.Error())
-// 		return
-// 	}
-//
-// 	socket.SetHostConnection(conn)
-//
-// 	http.HandleFunc("/send-sync", api.RequestSync)
-// 	go service.KeepClientAlive(conn)
-// 	go service.HandleReceiveAndProcessIncomingMessages(conn)
-//
-// 	utils.LogInfo("Listening for sync requests on localhost port :10001")
-//
-// 	if err := http.ListenAndServe(cfg.Session.Port, nil); err != nil {
-// 		utils.LogError(err.Error())
-// 	}
-//
-// 	utils.LogWarn("Connection to host has been lost. Shutting down.")
-// }
+func runPeer(cfgName string) {
+	cfg := utils.InitClientConfig(cfgName)
+	host := "wss://" + cfg.Session.Host.Url + "/connect"
+	utils.LogInfo("Attempting to connect to: %s", host)
 
-func runAdminMode() {
+	conn, _, err := websocket.DefaultDialer.Dial(host, nil)
+	if err != nil {
+		utils.LogError("Could not dial %s due to error: %s", host, err.Error())
+		return
+	}
+	defer conn.Close()
+
+	utils.LogInfo("Connection to host at %s established successfully", host)
+	utils.LogInfo("Attempting authentication handshake")
+
+	err = conn.WriteMessage(websocket.TextMessage, []byte(cfg.Session.Client.Token))
+	if err != nil {
+		utils.LogError("Authentication token for handshake could not be sent: %s", err.Error())
+		return
+	}
+
+	socket.SetHostConnection(conn)
+
+	http.HandleFunc("/send-sync", api.RequestSync)
+	go service.KeepClientAlive(conn)
+	go service.HandleReceiveAndProcessIncomingMessages(conn)
+
+	utils.LogInfo("Listening for sync requests on localhost port :10001")
+
+	if err := http.ListenAndServe(cfg.Session.Port, nil); err != nil {
+		utils.LogError(err.Error())
+	}
+
+	utils.LogWarn("Connection to host has been lost. Shutting down.")
+}
+
+func runAdmin() {
 	utils.LogInfo("Admin console")
 	utils.LogInfo("Commands: new-otp, exit")
 

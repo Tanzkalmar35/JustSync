@@ -18,8 +18,7 @@ import (
 
 const (
 	MinChunkSize = 1 << 11          // 2kb
-	AvgChunkSize = 1 << 13          // 8kb
-	MaxChunkSize = 1 << 15          // 32 kb
+	AvgChunkSize = 1 << 13          // 8kb MaxChunkSize = 1 << 15          // 32 kb
 	ChunkerPol   = 0x3DA3358B4DC173 // Recommended CDC polynomial
 )
 
@@ -140,20 +139,6 @@ func GetHasher() func([]byte) []byte {
 	}
 }
 
-func GetOsSpecificConfigPath() string {
-	switch runtime.GOOS {
-	case "windows": // Well... windows
-		return filepath.Join(os.Getenv("APPDATA"), "JustSync")
-	case "darwin": // Macos
-		return filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "JustSync")
-	default: // Linux, BSD, ...
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-			return filepath.Join(xdg, "JustSync")
-		}
-		return filepath.Join(os.Getenv("HOME"), ".config", "JustSync")
-	}
-}
-
 func CreateConfigFolderAt(path string) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.MkdirAll(path, 0755); err != nil {
@@ -164,38 +149,4 @@ func CreateConfigFolderAt(path string) {
 	} else {
 		LogInfo("Config directory does already exist")
 	}
-}
-
-func GetExternalClientConfig(name string) ExternalClientConfig {
-	var config ExternalClientConfig
-	path := filepath.Join(GetOsSpecificConfigPath(), name+".yml")
-	configContent, err := os.ReadFile(path)
-	if err != nil {
-		LogError("Config '%s' not found at os' specific config path '%s'", name, path)
-		return config
-	}
-
-	if err = yaml.Unmarshal(configContent, &config); err != nil {
-		LogError("Error in config '%s' found. Could not parse config.", name)
-		return config
-	}
-
-	return config
-}
-
-func GetExternalHostConfig(name string) ExternalHostConfig {
-	var config ExternalHostConfig
-	path := filepath.Join(GetOsSpecificConfigPath(), name+".yml")
-	configContent, err := os.ReadFile(path)
-	if err != nil {
-		LogError("Config '%s' not found at os' specific config path '%s'", name, path)
-		return config
-	}
-
-	if err = yaml.Unmarshal(configContent, &config); err != nil {
-		LogError("Error in config '%s' found. Could not parse config.", name)
-		return config
-	}
-
-	return config
 }
