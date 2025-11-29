@@ -1,0 +1,92 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LspHeader {
+    pub jsonrpc: String,
+    // MUST be Option. Responses (like the one causing the crash) do not have this field.
+    pub method: Option<String>,
+    pub id: Option<serde_json::Value>,
+    pub params: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DidOpenParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentItem,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TextDocumentItem {
+    pub uri: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DidChangeParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: VersionedTextDocumentIdentifier,
+    #[serde(rename = "contentChanges")]
+    pub content_changes: Vec<TextDocumentContentChangeEvent>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VersionedTextDocumentIdentifier {
+    pub uri: String,
+    pub version: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TextDocumentContentChangeEvent {
+    pub range: Option<Range>,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Range {
+    pub start: Position,
+    pub end: Position,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Position {
+    pub line: usize,
+    pub character: usize,
+}
+
+// Helper reader (Keep your existing read_message implementation or use this one)
+use anyhow::{Context, Result, anyhow};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
+
+pub async fn read_message<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+) -> Result<Option<String>> {
+    let mut content_length: Option<usize> = None;
+
+    loop {
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line).await?;
+
+        if bytes_read == 0 {
+            return Ok(None);
+        }
+
+        if line.trim().is_empty() {
+            break;
+        }
+
+        if line.to_lowercase().starts_with("content-length:") {
+            let content_length_dirty = line
+                .split(":")
+                .last()
+                .ok_or_else(|| anyhow!("Content-Length header is malformed"))?;
+            content_length = Some(content_length_dirty.trim().parse::<usize>()?);
+        }
+    }
+
+    let length = content_length.ok_or_else(|| anyhow!("Missing Content-Length header"))?;
+    let mut body_buffer = vec![0; length];
+    reader.read_exact(&mut body_buffer).await?;
+    let body = String::from_utf8(body_buffer).context("LSP body was not valid UTF-8")?;
+
+    Ok(Some(body))
+}
