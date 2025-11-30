@@ -14,6 +14,7 @@ use crate::{
 };
 
 pub mod diff;
+pub mod fs;
 pub mod logger;
 pub mod lsp;
 pub mod network;
@@ -127,9 +128,8 @@ async fn start_task(
     let connection = if is_host {
         net.get_next_connection().await
     } else {
-        // FIX: Actually connect!
         if let Some(ip) = remote_ip {
-            net.connect(ip).await.ok() // .ok() converts Result to Option
+            net.connect(ip).await.ok()
         } else {
             logger::log("Client started without IP!");
             None
@@ -147,7 +147,28 @@ async fn start_task(
             conn.open_bi().await
         };
 
-        if let Ok((send, recv)) = stream_result {
+        if let Ok((mut send, recv)) = stream_result {
+            if is_host {
+                // Transmitting initial file state
+                crate::logger::log(">> [Network] Scanning project files...");
+                let files = crate::fs::get_project_files();
+                logger::log(&format!(">> [Network] Sending {} files...", files.len()));
+
+                let msg = NetMessage::ProjectState { files };
+                // Use your existing send helper
+                if let Err(e) = crate::network::send_message(&mut send, &msg).await {
+                    logger::log(&format!("Failed to send project state: {}", e));
+                }
+            } else {
+                // Send initial msg containing application version - "Hey, I'm there!'"
+                let msg = crate::network::NetMessage::Handshake {
+                    version: "0.2.0".to_string(),
+                };
+                if let Err(e) = crate::network::send_message(&mut send, &msg).await {
+                    crate::logger::log(&format!("Failed to send handshake: {}", e));
+                }
+            }
+
             sync_loop(rx, send, recv, state, &editor_tx).await;
         }
     };
@@ -216,7 +237,7 @@ async fn merge_incoming(
                 let mut doc_guard = state.lock().unwrap();
 
                 // 1. PREPARE OLD STATE
-                // If we have a doc, clone the current rope. 
+                // If we have a doc, clone the current rope.
                 // If not (hydration), start with an empty rope.
                 let old_rope = if let Some(doc) = doc_guard.as_ref() {
                     doc.content.clone()
@@ -258,12 +279,13 @@ async fn merge_incoming(
                             edits.len()
                         ));
 
-                        // Increment the Echo Counter by the number of edits? 
-                        // No, Neovim sends one 'didChange' per 'applyEdit' call usually, 
+                        // Increment the Echo Counter by the number of edits?
+                        // No, Neovim sends one 'didChange' per 'applyEdit' call usually,
                         // regardless of how many textEdits are inside.
                         // So we increment by 1.
                         if !edits.is_empty() {
-                            doc.pending_remote_updates.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            doc.pending_remote_updates
+                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             Some((uri.clone(), edits))
                         } else {
                             None // No visual changes, don't bother the editor
@@ -281,6 +303,19 @@ async fn merge_incoming(
                 if let Err(e) = editor_tx.send((uri, edits)).await {
                     crate::logger::log(&format!("Could not send refresh to editor: {}", e));
                 }
+            }
+        }
+        NetMessage::ProjectState { files } => {
+            crate::logger::log(&format!(
+                ">> [Network] Received Project State: {} files",
+                files.len()
+            ));
+
+            // Write to disk
+            if let Err(e) = crate::fs::write_project_files(files) {
+                crate::logger::log(&format!("!! [FS] Failed to write files: {}", e));
+            } else {
+                crate::logger::log(">> [FS] Project initialization complete.");
             }
         }
         _ => {}

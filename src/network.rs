@@ -14,8 +14,12 @@ pub enum NetMessage {
     /// A generic handshake to verify protocol version (optional for now, but good practice)
     Handshake { version: String },
 
+    // Initial 'cloning' payload
+    ProjectState { files: Vec<(String, String)> },
+
     /// A binary blob representing a CRDT patch (from diamond-types)
     Sync { uri: String, data: Vec<u8> },
+
     // Future: Cursor { line: usize, col: usize }
 }
 
