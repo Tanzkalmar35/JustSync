@@ -1,18 +1,19 @@
-use ropey::Rope;
 use std::{
     env,
     net::SocketAddr,
     process::exit,
-    sync::{Arc, Mutex, atomic::AtomicUsize},
+    sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
 
 use crate::{
+    lsp::TextEdit,
     network::{NetMessage, NetworkManager},
     proxy::start_proxy,
     state::Document,
 };
 
+pub mod diff;
 pub mod logger;
 pub mod lsp;
 pub mod network;
@@ -75,219 +76,213 @@ impl Context {
             })
         }
     }
+}
 
-    #[tokio::main]
-    pub async fn main() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+#[tokio::main]
+pub async fn main() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // Parse application context from command line params
-        let args: Vec<String> = env::args().collect();
-        let ctx_res = Context::parse_ctx(args, 1);
-        if let Err(e) = ctx_res {
-            panic!("{}", e.to_string());
-        }
-        let ctx = ctx_res.unwrap();
+    // Parse application context from command line params
+    let args: Vec<String> = env::args().collect();
+    let ctx_res = Context::parse_ctx(args, 1);
+    if let Err(e) = ctx_res {
+        panic!("{}", e.to_string());
+    }
+    let ctx = ctx_res.unwrap();
 
-        let doc: Arc<Mutex<Option<Document>>> = Arc::new(Mutex::new(None));
-        let (editor_tx, editor_rx) = mpsc::channel::<(String, String, usize)>(100);
-        let (tx, rx) = mpsc::channel(100);
+    let doc: Arc<Mutex<Option<Document>>> = Arc::new(Mutex::new(None));
+    let (editor_tx, editor_rx) = mpsc::channel::<(String, Vec<TextEdit>)>(100);
+    let (tx, rx) = mpsc::channel(100);
 
-        if let Some(net) = ctx.network {
-            let doc_ref = doc.clone();
+    if let Some(net) = ctx.network {
+        let doc_ref = doc.clone();
 
-            tokio::spawn(async move {
-                start_task(net, ctx.is_host, rx, ctx.remote_ip, doc_ref, editor_tx).await;
-            });
-        }
-
-        match start_proxy(ctx.target, ctx.target_args, doc, tx, editor_rx).await {
-            Ok(_) => {
-                eprintln!("Proxy exited successfully.");
-            }
-            Err(e) => {
-                eprintln!("Proxy failed: {}", e);
-                exit(1);
-            }
-        }
+        tokio::spawn(async move {
+            start_task(net, ctx.is_host, rx, ctx.remote_ip, doc_ref, editor_tx).await;
+        });
     }
 
-    async fn start_task(
-        net: NetworkManager,
-        is_host: bool,
-        rx: mpsc::Receiver<(String, Vec<u8>)>,
-        remote_ip: Option<SocketAddr>,
-        state: Arc<Mutex<Option<Document>>>,
-        editor_tx: mpsc::Sender<(String, String, usize)>,
-    ) {
-        logger::log(">> [Network] Task started");
+    match start_proxy(ctx.target, ctx.target_args, doc, tx, editor_rx).await {
+        Ok(_) => {
+            eprintln!("Proxy exited successfully.");
+        }
+        Err(e) => {
+            eprintln!("Proxy failed: {}", e);
+            exit(1);
+        }
+    }
+}
 
-        // establish connection
-        let connection = if is_host {
-            net.get_next_connection().await
+async fn start_task(
+    net: NetworkManager,
+    is_host: bool,
+    rx: mpsc::Receiver<(String, Vec<u8>)>,
+    remote_ip: Option<SocketAddr>,
+    state: Arc<Mutex<Option<Document>>>,
+    editor_tx: mpsc::Sender<(String, Vec<TextEdit>)>,
+) {
+    logger::log(">> [Network] Task started");
+
+    // establish connection
+    let connection = if is_host {
+        net.get_next_connection().await
+    } else {
+        // FIX: Actually connect!
+        if let Some(ip) = remote_ip {
+            net.connect(ip).await.ok() // .ok() converts Result to Option
         } else {
-            // FIX: Actually connect!
-            if let Some(ip) = remote_ip {
-                net.connect(ip).await.ok() // .ok() converts Result to Option
-            } else {
-                logger::log("Client started without IP!");
-                None
-            }
+            logger::log("Client started without IP!");
+            None
+        }
+    };
+
+    if let Some(conn) = connection {
+        logger::log(">> [Network] Handshake complete.");
+
+        // open stream
+        // Host accepts stream, client opens stream.
+        let stream_result = if is_host {
+            conn.accept_bi().await
+        } else {
+            conn.open_bi().await
         };
 
-        if let Some(conn) = connection {
-            logger::log(">> [Network] Handshake complete.");
+        if let Ok((send, recv)) = stream_result {
+            sync_loop(rx, send, recv, state, &editor_tx).await;
+        }
+    };
+}
 
-            // open stream
-            // Host accepts stream, client opens stream.
-            let stream_result = if is_host {
-                conn.accept_bi().await
-            } else {
-                conn.open_bi().await
-            };
+// The actual sync loop
+// Wait for RX (Local changes) OR RECV (Remote changes)
+async fn sync_loop(
+    mut rx: mpsc::Receiver<(String, Vec<u8>)>,
+    mut send: quinn::SendStream,
+    mut recv: quinn::RecvStream,
+    state: Arc<Mutex<Option<Document>>>,
+    editor_tx: &mpsc::Sender<(String, Vec<TextEdit>)>,
+) {
+    crate::logger::log(">> [Network] Stream open. Entering Sync Loop.");
 
-            if let Ok((send, recv)) = stream_result {
-                sync_loop(rx, send, recv, state, &editor_tx).await;
-            }
-        };
-    }
-
-    // The actual sync loop
-    // Wait for RX (Local changes) OR RECV (Remote changes)
-    async fn sync_loop(
-        mut rx: mpsc::Receiver<(String, Vec<u8>)>,
-        mut send: quinn::SendStream,
-        mut recv: quinn::RecvStream,
-        state: Arc<Mutex<Option<Document>>>,
-        editor_tx: &mpsc::Sender<(String, String, usize)>,
-    ) {
-        crate::logger::log(">> [Network] Stream open. Entering Sync Loop.");
-
-        loop {
-            // tokio::select! waits for the FIRST one of these to complete.
-            // It then drops the other future.
-            tokio::select! {
-                // BRANCH 1: Local Change (from Proxy) -> Send to Network
-                // We await rx.recv(). It returns Option<Vec<u8>>.
-                maybe_patch = rx.recv() => {
-                    match maybe_patch {
-                        Some((uri, patch)) => {
-                            let msg = crate::network::NetMessage::Sync { uri, data: patch };
-                            if let Err(e) = crate::network::send_message(&mut send, &msg).await {
-                                crate::logger::log(&format!("!! [Network] Send Error: {}", e));
-                                break; // Connection likely dead
-                            }
-                        }
-                        None => {
-                            // The mpsc channel was closed (Proxy died). We should exit.
-                            crate::logger::log(">> [Network] Proxy channel closed. Exiting.");
-                            break;
+    loop {
+        // tokio::select! waits for the FIRST one of these to complete.
+        // It then drops the other future.
+        tokio::select! {
+            // BRANCH 1: Local Change (from Proxy) -> Send to Network
+            // We await rx.recv(). It returns Option<Vec<u8>>.
+            maybe_patch = rx.recv() => {
+                match maybe_patch {
+                    Some((uri, patch)) => {
+                        let msg = crate::network::NetMessage::Sync { uri, data: patch };
+                        if let Err(e) = crate::network::send_message(&mut send, &msg).await {
+                            crate::logger::log(&format!("!! [Network] Send Error: {}", e));
+                            break; // Connection likely dead
                         }
                     }
+                    None => {
+                        // The mpsc channel was closed (Proxy died). We should exit.
+                        crate::logger::log(">> [Network] Proxy channel closed. Exiting.");
+                        break;
+                    }
                 }
+            }
 
-                // BRANCH 2: Remote Change (from Network) -> Apply to Doc
-                // We await recv_message. It returns Result<NetMessage>.
-                result = crate::network::recv_message(&mut recv) => {
-                    match result {
-                        Ok(msg) => {
-                            merge_incoming(state.clone(), msg, &editor_tx).await;
-                        }
-                        Err(e) => {
-                            // QUIC stream error or connection closed
-                            crate::logger::log(&format!("!! [Network] Recv Error (Peer disconnected?): {}", e));
-                            break;
-                        }
+            // BRANCH 2: Remote Change (from Network) -> Apply to Doc
+            // We await recv_message. It returns Result<NetMessage>.
+            result = crate::network::recv_message(&mut recv) => {
+                match result {
+                    Ok(msg) => {
+                        merge_incoming(state.clone(), msg, &editor_tx).await;
+                    }
+                    Err(e) => {
+                        // QUIC stream error or connection closed
+                        crate::logger::log(&format!("!! [Network] Recv Error (Peer disconnected?): {}", e));
+                        break;
                     }
                 }
             }
         }
     }
+}
 
-    async fn merge_incoming(
-        state: Arc<Mutex<Option<Document>>>,
-        msg: NetMessage,
-        editor_tx: &mpsc::Sender<(String, String, usize)>,
-    ) {
-        match msg {
-            crate::network::NetMessage::Sync { uri, data } => {
-                // Scope the lock to perform synchronous CPU work
-                let notification_data = {
-                    let mut doc_guard = state.lock().unwrap();
+async fn merge_incoming(
+    state: Arc<Mutex<Option<Document>>>,
+    msg: NetMessage,
+    editor_tx: &mpsc::Sender<(String, Vec<crate::lsp::TextEdit>)>,
+) {
+    match msg {
+        crate::network::NetMessage::Sync { uri, data } => {
+            let notification_data = {
+                let mut doc_guard = state.lock().unwrap();
 
-                    // CASE 1: Document exists. Merge changes.
-                    if let Some(doc) = doc_guard.as_mut() {
-                        // 1. CAPTURE STATE BEFORE UPDATE
-                        // We need the *current* number of lines to tell the editor
-                        // exactly what range to replace.
-                        let current_line_count = doc.content.len_lines();
+                // 1. PREPARE OLD STATE
+                // If we have a doc, clone the current rope. 
+                // If not (hydration), start with an empty rope.
+                let old_rope = if let Some(doc) = doc_guard.as_ref() {
+                    doc.content.clone()
+                } else {
+                    ropey::Rope::new()
+                };
 
-                        match doc.crdt.merge_data_and_ff(&data) {
-                            Ok(_) => {
-                                let new_text = doc.crdt.branch.content().to_string();
-                                doc.content = ropey::Rope::from_str(&new_text);
+                // 2. UPDATE STATE (Merge or Load)
+                let merge_result = if let Some(doc) = doc_guard.as_mut() {
+                    // Case A: Existing Doc -> Merge
+                    doc.crdt.merge_data_and_ff(&data).map(|_| doc)
+                } else {
+                    // Case B: New Doc -> Load from Patch
+                    match diamond_types::list::ListCRDT::load_from(&data) {
+                        Ok(crdt) => {
+                            // Init with 0 pending updates
+                            *doc_guard = Some(Document::new(uri.clone(), "".to_string()));
+                            // We must overwrite the CRDT we just made with the loaded one
+                            let doc = doc_guard.as_mut().unwrap();
+                            doc.crdt = crdt;
+                            Ok(doc)
+                        }
+                        Err(e) => Err(e),
+                    }
+                };
 
-                                // NEW: We are about to trigger an edit. Expect an echo.
-                                doc.pending_remote_updates
-                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // 3. UPDATE VIEW & CALCULATE DIFF
+                match merge_result {
+                    Ok(doc) => {
+                        // Sync Rope to match new CRDT state
+                        let new_text_str = doc.crdt.branch.content().to_string();
+                        doc.content = ropey::Rope::from_str(&new_text_str);
 
-                                crate::logger::log(&format!(
-                                    ">> [Network] Merged. Expecting echo. Pending: {}",
-                                    doc.pending_remote_updates
-                                        .load(std::sync::atomic::Ordering::SeqCst)
-                                ));
+                        // CALCULATE DIFF (Old Rope vs New Rope)
+                        let edits = crate::diff::calculate_edits(&old_rope, &doc.content);
 
-                                Some((uri.clone(), new_text, current_line_count))
-                            }
-                            Err(e) => {
-                                crate::logger::log(&format!("!! [Network] Merge Failed: {:?}", e));
-                                None
-                            }
+                        crate::logger::log(&format!(
+                            ">> [Network] Merged. Generated {} surgical edits.",
+                            edits.len()
+                        ));
+
+                        // Increment the Echo Counter by the number of edits? 
+                        // No, Neovim sends one 'didChange' per 'applyEdit' call usually, 
+                        // regardless of how many textEdits are inside.
+                        // So we increment by 1.
+                        if !edits.is_empty() {
+                            doc.pending_remote_updates.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            Some((uri.clone(), edits))
+                        } else {
+                            None // No visual changes, don't bother the editor
                         }
                     }
-                    // CASE 2: No Document. Hydrate from Patch.
-                    else {
-                        crate::logger::log(
-                            ">> [Network] Host has no document. Hydrating from Patch...",
-                        );
-
-                        match diamond_types::list::ListCRDT::load_from(&data) {
-                            Ok(crdt) => {
-                                // Extract text
-                                let new_text = crdt.branch.content().to_string();
-                                let content = Rope::from_str(&new_text);
-
-                                // Create new Document state
-                                *doc_guard = Some(Document {
-                                    uri: uri.clone(),
-                                    content,
-                                    crdt,
-                                    pending_remote_updates: AtomicUsize::new(0),
-                                });
-                                crate::logger::log(">> [Network] Host successfully hydrated!");
-
-                                // For hydration, we use a safe large range because we are replacing
-                                // whatever (or nothing) is there.
-                                Some((uri.clone(), new_text, 999999))
-                            }
-                            Err(e) => {
-                                crate::logger::log(&format!(
-                                    "!! [Network] Hydration Failed: {:?}",
-                                    e
-                                ));
-                                None
-                            }
-                        }
-                    }
-                }; // Lock dropped here
-
-                // 3. SEND NOTIFICATION (Async)
-                if let Some((uri, text, line_count)) = notification_data {
-                    if let Err(e) = editor_tx.send((uri, text, line_count)).await {
-                        crate::logger::log(&format!("Could not send refresh to editor: {}", e));
+                    Err(e) => {
+                        crate::logger::log(&format!("!! [Network] Merge/Load Failed: {:?}", e));
+                        None
                     }
                 }
+            }; // Lock dropped
+
+            // 4. SEND EDITS
+            if let Some((uri, edits)) = notification_data {
+                if let Err(e) = editor_tx.send((uri, edits)).await {
+                    crate::logger::log(&format!("Could not send refresh to editor: {}", e));
+                }
             }
-            _ => {}
         }
+        _ => {}
     }
 }

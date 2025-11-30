@@ -41,19 +41,26 @@ pub struct TextDocumentContentChangeEvent {
     pub text: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Range {
     pub start: Position,
     pub end: Position,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Position {
     pub line: usize,
     pub character: usize,
 }
 
-// Helper reader (Keep your existing read_message implementation or use this one)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TextEdit {
+    pub range: Range,
+    #[serde(rename = "newText")]
+    pub new_text: String,
+}
+
+// Helper reader 
 use anyhow::{Context, Result, anyhow};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 

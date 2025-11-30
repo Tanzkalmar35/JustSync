@@ -13,7 +13,7 @@ use tokio::{
 
 use crate::{
     logger,
-    lsp::{self, DidChangeParams, DidOpenParams, LspHeader},
+    lsp::{self, DidChangeParams, DidOpenParams, LspHeader, TextEdit},
     state::Document,
 };
 
@@ -22,7 +22,7 @@ pub async fn start_proxy(
     target_args: Vec<String>,
     state: Arc<Mutex<Option<Document>>>,
     patch_tx: mpsc::Sender<(String, Vec<u8>)>,
-    editor_rx: mpsc::Receiver<(String, String, usize)>,
+    editor_rx: mpsc::Receiver<(String, Vec<TextEdit>)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(target_cmd)
         .args(target_args)
@@ -91,7 +91,8 @@ async fn process_stdin(
                             }
                             "textDocument/didChange" => {
                                 if let Some(params) = header.params {
-                                    should_forward = process_did_change_action(params, state_ref, &tx).await;
+                                    should_forward =
+                                        process_did_change_action(params, state_ref, &tx).await;
                                 }
                             }
                             _ => {}
@@ -148,7 +149,7 @@ async fn process_stdin(
 async fn run_stdout_loop(
     mut child_stdout: ChildStdout,
     mut parent_stdout: Stdout,
-    mut editor_rx: mpsc::Receiver<(String, String, usize)>,
+    mut editor_rx: mpsc::Receiver<(String, Vec<TextEdit>)>,
 ) {
     let mut buf = [0u8; 4096];
 
@@ -170,24 +171,18 @@ async fn run_stdout_loop(
             }
 
             // Branch B: Inject Editor Command
-            Some((uri, new_text, last_line)) = editor_rx.recv() => {
+            Some((uri, edits)) = editor_rx.recv() => {
                 let mut changes = serde_json::Map::new();
-                changes.insert(uri, json!([
-                    {
-                        "range": {
-                            "start": { "line": 0, "character": 0 },
-                            "end": { "line": last_line + 1, "character": 0 }
-                        },
-                        "newText": new_text
-                    }
-                ]));
+
+                // Serialize the edits vector directly into JSON
+                changes.insert(uri, serde_json::to_value(edits).unwrap());
 
                 let msg = json!({
                     "jsonrpc": "2.0",
-                    "id": 100, // Arbitrary ID
+                    "id": 100,
                     "method": "workspace/applyEdit",
                     "params": {
-                        "label": "JustSync Update",
+                        "label": "JustSync",
                         "edit": {
                             "changes": changes
                         }
@@ -220,28 +215,36 @@ async fn process_did_change_action(
     params_val: Value,
     state: &Arc<Mutex<Option<Document>>>,
     tx: &mpsc::Sender<(String, Vec<u8>)>,
-) -> bool { // <--- Change return type to bool
+) -> bool {
+    // <--- Change return type to bool
     if let Ok(params) = serde_json::from_value::<DidChangeParams>(params_val) {
         let mut doc_guard = state.lock().unwrap();
-        if doc_guard.is_none() { 
+        if doc_guard.is_none() {
             // If no doc, maybe forward? Or drop? Let's forward to be safe.
-            return true; 
+            return true;
         }
         let doc = doc_guard.as_mut().unwrap();
 
         // Check if we should ignore this (Echo Suppression)
-        let pending = doc.pending_remote_updates.load(std::sync::atomic::Ordering::SeqCst);
+        let pending = doc
+            .pending_remote_updates
+            .load(std::sync::atomic::Ordering::SeqCst);
         if pending > 0 {
-            doc.pending_remote_updates.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-            crate::logger::log(">> [Proxy] Echo suppressed (Counter decrement). NOT Forwarding to Child.");
+            doc.pending_remote_updates
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            crate::logger::log(
+                ">> [Proxy] Echo suppressed (Counter decrement). NOT Forwarding to Child.",
+            );
             return false; // <--- DO NOT FORWARD
         }
 
         for change in params.content_changes {
             if let Some(range) = change.range {
                 let (start, end) = doc.get_offsets(
-                    range.start.line, range.start.character, 
-                    range.end.line, range.end.character
+                    range.start.line,
+                    range.start.character,
+                    range.end.line,
+                    range.end.character,
                 );
 
                 // 1. Update View
