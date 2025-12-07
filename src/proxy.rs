@@ -12,17 +12,19 @@ use tokio::{
 };
 
 use crate::{
+    fs::{to_absolute_uri, to_relative_path},
     logger,
     lsp::{self, DidChangeParams, DidOpenParams, LspHeader, TextEdit},
-    state::Document,
+    state::{Document, Workspace},
 };
 
 pub async fn start_proxy(
     target_cmd: String,
     target_args: Vec<String>,
-    state: Arc<Mutex<Option<Document>>>,
+    state: Arc<Mutex<Workspace>>,
     patch_tx: mpsc::Sender<(String, Vec<u8>)>,
     editor_rx: mpsc::Receiver<(String, Vec<TextEdit>)>,
+    root_dir: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(target_cmd)
         .args(target_args)
@@ -43,36 +45,41 @@ pub async fn start_proxy(
     let state_ref = state.clone();
 
     // Task A: Parent Stdin -> Child Stdin (With Interception)
+    let root_dir_ref = root_dir.clone();
     let stdin_task = tokio::spawn(async move {
         let reader = BufReader::new(parent_stdin);
-        if let Err(e) = process_stdin(child_stdin, reader, &state_ref, patch_tx).await {
-            eprintln!("Error processing stdin: {}", e);
+        if let Err(e) =
+            process_stdin(child_stdin, reader, &state_ref, patch_tx, &root_dir_ref).await
+        {
             logger::log(&format!("!! [Proxy] Stdin task failed: {}", e));
         }
     });
 
     // Task B: Child Stdout + Injections -> Parent Stdout
-    let stdout_task = tokio::spawn(run_stdout_loop(child_stdout, parent_stdout, editor_rx));
+    let stdout_task = tokio::spawn(async move {
+        run_stdout_loop(child_stdout, parent_stdout, editor_rx, &root_dir).await;
+    });
 
     // Task C: Child Stderr -> Parent Stderr
     let stderr_task = tokio::spawn(async move {
         if let Err(e) = tokio::io::copy(&mut child_stderr, &mut parent_stderr).await {
-            eprintln!("Error copying stderr: {}", e);
+            logger::log(&format!("Error copying stderr: {}", e));
         }
     });
 
     let status = child.wait().await?;
     let _ = tokio::join!(stdin_task, stdout_task, stderr_task);
 
-    eprintln!("Proxy: Child process exited with {}", status);
+    logger::log(&format!("Proxy: Child process exited with {}", status));
     Ok(())
 }
 
 async fn process_stdin(
     mut child_stdin: ChildStdin,
     mut reader: BufReader<Stdin>,
-    state_ref: &Arc<Mutex<Option<Document>>>,
+    state: &Arc<Mutex<Workspace>>,
     tx: mpsc::Sender<(String, Vec<u8>)>,
+    root_dir: &String,
 ) -> Result<()> {
     loop {
         match lsp::read_message(&mut reader).await {
@@ -86,13 +93,14 @@ async fn process_stdin(
                         match method.as_str() {
                             "textDocument/didOpen" => {
                                 if let Some(params) = header.params {
-                                    process_did_open_action(params, state_ref).await;
+                                    process_did_open_action(params, state, root_dir).await;
                                 }
                             }
                             "textDocument/didChange" => {
                                 if let Some(params) = header.params {
                                     should_forward =
-                                        process_did_change_action(params, state_ref, &tx).await;
+                                        process_did_change_action(params, state, &tx, root_dir)
+                                            .await;
                                 }
                             }
                             _ => {}
@@ -150,6 +158,7 @@ async fn run_stdout_loop(
     mut child_stdout: ChildStdout,
     mut parent_stdout: Stdout,
     mut editor_rx: mpsc::Receiver<(String, Vec<TextEdit>)>,
+    root_dir: &String,
 ) {
     let mut buf = [0u8; 4096];
 
@@ -164,7 +173,7 @@ async fn run_stdout_loop(
                         let _ = parent_stdout.flush().await;
                     }
                     Err(e) => {
-                        eprintln!("Error reading from child stdout: {}", e);
+                        logger::log(&format!("Error reading from child stdout: {}", e));
                         break;
                     }
                 }
@@ -173,9 +182,10 @@ async fn run_stdout_loop(
             // Branch B: Inject Editor Command
             Some((uri, edits)) = editor_rx.recv() => {
                 let mut changes = serde_json::Map::new();
+                let absolute_uri = to_absolute_uri(&uri, &root_dir);
 
                 // Serialize the edits vector directly into JSON
-                changes.insert(uri, serde_json::to_value(edits).unwrap());
+                changes.insert(absolute_uri, serde_json::to_value(edits).unwrap());
 
                 let msg = json!({
                     "jsonrpc": "2.0",
@@ -202,30 +212,39 @@ async fn run_stdout_loop(
     }
 }
 
-async fn process_did_open_action(params_val: Value, state: &Arc<Mutex<Option<Document>>>) {
+async fn process_did_open_action(
+    params_val: Value,
+    state: &Arc<Mutex<Workspace>>,
+    root_dir: &String,
+) {
     if let Ok(params) = serde_json::from_value::<DidOpenParams>(params_val) {
-        let doc = Document::new(params.text_document.uri.clone(), params.text_document.text);
-        let mut doc_guard = state.lock().unwrap();
-        *doc_guard = Some(doc);
+        let uri = to_relative_path(&params.text_document.uri, root_dir);
+        logger::log(&format!(">> [Proxy] Normalized Open Key: '{}'", uri));
+        let mut workspace_guard = state.lock().unwrap();
+        workspace_guard.get_or_create(uri, params.text_document.text);
         logger::log(&format!(">> Opened Document: {}", params.text_document.uri));
     }
 }
 
 async fn process_did_change_action(
     params_val: Value,
-    state: &Arc<Mutex<Option<Document>>>,
+    state: &Arc<Mutex<Workspace>>,
     tx: &mpsc::Sender<(String, Vec<u8>)>,
+    root_dir: &String,
 ) -> bool {
-    // <--- Change return type to bool
     if let Ok(params) = serde_json::from_value::<DidChangeParams>(params_val) {
-        let mut doc_guard = state.lock().unwrap();
-        if doc_guard.is_none() {
-            // If no doc, maybe forward? Or drop? Let's forward to be safe.
-            return true;
-        }
-        let doc = doc_guard.as_mut().unwrap();
+        let mut workspace_guard = state.lock().unwrap();
+        let uri = to_relative_path(&params.text_document.uri, root_dir);
+        logger::log(&format!(">> [Proxy] Normalized Change Key: '{}'", uri));
 
         // Check if we should ignore this (Echo Suppression)
+        let doc_opt = workspace_guard.get_mut(&uri);
+        if doc_opt.is_none() {
+            logger::log(">> [Proxy] [Error] Received update event for non existent doc");
+            return true; // Forward anyways, maybe the LSP knows about it...
+        }
+        let doc = doc_opt.unwrap();
+
         let pending = doc
             .pending_remote_updates
             .load(std::sync::atomic::Ordering::SeqCst);
@@ -258,9 +277,13 @@ async fn process_did_change_action(
                 let uri = doc.uri.clone();
                 let tx_clone = tx.clone();
                 tokio::spawn(async move {
-                    let _ = tx_clone.send((uri, patch)).await;
+                    match tx_clone.send((uri, patch)).await {
+                        Ok(_) => crate::logger::log(">> [Proxy] Sent patch to channel"),
+                        Err(e) => {
+                            crate::logger::log(&format!("!! [Proxy] Channel Send Error: {}", e))
+                        }
+                    }
                 });
-
                 crate::logger::log(&format!("Wrote bytes | CRDT Len: {}", doc.crdt.len()));
             } else {
                 // Full sync logic

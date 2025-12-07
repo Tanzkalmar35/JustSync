@@ -1,7 +1,29 @@
-use std::sync::atomic::AtomicUsize;
+use std::{collections::HashMap, sync::atomic::AtomicUsize};
 
 use diamond_types::list::ListCRDT;
 use ropey::Rope;
+
+pub struct Workspace {
+    pub state: HashMap<String, Document>,
+}
+
+impl Workspace {
+    pub fn new() -> Self {
+        Self {
+            state: HashMap::new(),
+        }
+    }
+
+    pub fn get_mut(&mut self, uri: &str) -> Option<&mut Document> {
+        self.state.get_mut(uri)
+    }
+
+    pub fn get_or_create(&mut self, uri: String, content: String) -> &mut Document {
+        self.state
+            .entry(uri.clone())
+            .or_insert_with(|| Document::new(uri, content))
+    }
+}
 
 pub struct Document {
     pub uri: String,

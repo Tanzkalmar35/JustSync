@@ -5,12 +5,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
+// some test change
 
 use crate::{
     lsp::TextEdit,
     network::{NetMessage, NetworkManager},
     proxy::start_proxy,
-    state::Document,
+    state::Workspace,
 };
 
 pub mod diff;
@@ -91,24 +92,55 @@ pub async fn main() {
     }
     let ctx = ctx_res.unwrap();
 
-    let doc: Arc<Mutex<Option<Document>>> = Arc::new(Mutex::new(None));
+    let workspace: Arc<Mutex<Workspace>> = Arc::new(Mutex::new(Workspace::new()));
     let (editor_tx, editor_rx) = mpsc::channel::<(String, Vec<TextEdit>)>(100);
     let (tx, rx) = mpsc::channel(100);
 
     if let Some(net) = ctx.network {
-        let doc_ref = doc.clone();
+        let workspace_ref = workspace.clone();
 
+        // Assign the handle
+        let handle = tokio::spawn(async move {
+            start_task(
+                net,
+                ctx.is_host,
+                rx,
+                ctx.remote_ip,
+                workspace_ref,
+                editor_tx,
+            )
+            .await;
+        });
+
+        // Spawn a monitor task
         tokio::spawn(async move {
-            start_task(net, ctx.is_host, rx, ctx.remote_ip, doc_ref, editor_tx).await;
+            match handle.await {
+                Ok(_) => crate::logger::log(">> [Network] Task finished."),
+                Err(e) => {
+                    if e.is_panic() {
+                        crate::logger::log("!! [Network] TASK PANICKED!");
+                    } else {
+                        crate::logger::log("!! [Network] Task cancelled.");
+                    }
+                }
+            }
         });
     }
-
-    match start_proxy(ctx.target, ctx.target_args, doc, tx, editor_rx).await {
+    match start_proxy(
+        ctx.target,
+        ctx.target_args,
+        workspace,
+        tx,
+        editor_rx,
+        env::current_dir().unwrap().to_string_lossy().to_string(),
+    )
+    .await
+    {
         Ok(_) => {
-            eprintln!("Proxy exited successfully.");
+            logger::log("Proxy exited successfully.");
         }
         Err(e) => {
-            eprintln!("Proxy failed: {}", e);
+            logger::log(&format!("Proxy failed: {}", e));
             exit(1);
         }
     }
@@ -119,7 +151,7 @@ async fn start_task(
     is_host: bool,
     rx: mpsc::Receiver<(String, Vec<u8>)>,
     remote_ip: Option<SocketAddr>,
-    state: Arc<Mutex<Option<Document>>>,
+    state: Arc<Mutex<Workspace>>,
     editor_tx: mpsc::Sender<(String, Vec<TextEdit>)>,
 ) {
     logger::log(">> [Network] Task started");
@@ -180,18 +212,16 @@ async fn sync_loop(
     mut rx: mpsc::Receiver<(String, Vec<u8>)>,
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
-    state: Arc<Mutex<Option<Document>>>,
+    state: Arc<Mutex<Workspace>>,
     editor_tx: &mpsc::Sender<(String, Vec<TextEdit>)>,
 ) {
     crate::logger::log(">> [Network] Stream open. Entering Sync Loop.");
 
     loop {
-        // tokio::select! waits for the FIRST one of these to complete.
-        // It then drops the other future.
         tokio::select! {
             // BRANCH 1: Local Change (from Proxy) -> Send to Network
-            // We await rx.recv(). It returns Option<Vec<u8>>.
             maybe_patch = rx.recv() => {
+                crate::logger::log(">> [Network] Processing local patch..."); // <--- ADD THIS
                 match maybe_patch {
                     Some((uri, patch)) => {
                         let msg = crate::network::NetMessage::Sync { uri, data: patch };
@@ -209,10 +239,11 @@ async fn sync_loop(
             }
 
             // BRANCH 2: Remote Change (from Network) -> Apply to Doc
-            // We await recv_message. It returns Result<NetMessage>.
             result = crate::network::recv_message(&mut recv) => {
+                crate::logger::log(">> [Network] Host attempting to receive remote message...");
                 match result {
                     Ok(msg) => {
+                        crate::logger::log(&format!(">> [Network] Received Message: {:?}", msg));
                         merge_incoming(state.clone(), msg, &editor_tx).await;
                     }
                     Err(e) => {
@@ -224,81 +255,54 @@ async fn sync_loop(
             }
         }
     }
+    crate::logger::log(">> [Network] Sync Loop Exited!");
 }
 
 async fn merge_incoming(
-    state: Arc<Mutex<Option<Document>>>,
+    state: Arc<Mutex<Workspace>>,
     msg: NetMessage,
     editor_tx: &mpsc::Sender<(String, Vec<crate::lsp::TextEdit>)>,
 ) {
     match msg {
         crate::network::NetMessage::Sync { uri, data } => {
             let notification_data = {
-                let mut doc_guard = state.lock().unwrap();
+                let mut workspace_guard = state.lock().unwrap();
 
-                // 1. PREPARE OLD STATE
-                // If we have a doc, clone the current rope.
-                // If not (hydration), start with an empty rope.
-                let old_rope = if let Some(doc) = doc_guard.as_ref() {
-                    doc.content.clone()
+                // 1. GET/CREATE DOC
+                let doc = workspace_guard.get_or_create(uri.clone(), "".to_string());
+
+                // 2. SNAPSHOT OLD STATE
+                let old_rope = doc.content.clone();
+
+                // 3. MERGE REMOTE CHANGES
+                if let Err(e) = doc.crdt.merge_data_and_ff(&data) {
+                    crate::logger::log(&format!("!! [Network] Merge Failed: {:?}", e));
+                    None
                 } else {
-                    ropey::Rope::new()
-                };
+                    // 4. UPDATE VIEW (Rope)
+                    let new_text_str = doc.crdt.branch.content().to_string();
+                    doc.content = ropey::Rope::from_str(&new_text_str);
 
-                // 2. UPDATE STATE (Merge or Load)
-                let merge_result = if let Some(doc) = doc_guard.as_mut() {
-                    // Case A: Existing Doc -> Merge
-                    doc.crdt.merge_data_and_ff(&data).map(|_| doc)
-                } else {
-                    // Case B: New Doc -> Load from Patch
-                    match diamond_types::list::ListCRDT::load_from(&data) {
-                        Ok(crdt) => {
-                            // Init with 0 pending updates
-                            *doc_guard = Some(Document::new(uri.clone(), "".to_string()));
-                            // We must overwrite the CRDT we just made with the loaded one
-                            let doc = doc_guard.as_mut().unwrap();
-                            doc.crdt = crdt;
-                            Ok(doc)
-                        }
-                        Err(e) => Err(e),
-                    }
-                };
+                    // 5. CALCULATE DIFF (Old Rope vs Current Rope)
+                    let edits = crate::diff::calculate_edits(&old_rope, &doc.content);
 
-                // 3. UPDATE VIEW & CALCULATE DIFF
-                match merge_result {
-                    Ok(doc) => {
-                        // Sync Rope to match new CRDT state
-                        let new_text_str = doc.crdt.branch.content().to_string();
-                        doc.content = ropey::Rope::from_str(&new_text_str);
+                    crate::logger::log(&format!(
+                        ">> [Network] Merged {}. Generated {} surgical edits.",
+                        uri,
+                        edits.len()
+                    ));
 
-                        // CALCULATE DIFF (Old Rope vs New Rope)
-                        let edits = crate::diff::calculate_edits(&old_rope, &doc.content);
-
-                        crate::logger::log(&format!(
-                            ">> [Network] Merged. Generated {} surgical edits.",
-                            edits.len()
-                        ));
-
-                        // Increment the Echo Counter by the number of edits?
-                        // No, Neovim sends one 'didChange' per 'applyEdit' call usually,
-                        // regardless of how many textEdits are inside.
-                        // So we increment by 1.
-                        if !edits.is_empty() {
-                            doc.pending_remote_updates
-                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            Some((uri.clone(), edits))
-                        } else {
-                            None // No visual changes, don't bother the editor
-                        }
-                    }
-                    Err(e) => {
-                        crate::logger::log(&format!("!! [Network] Merge/Load Failed: {:?}", e));
+                    if !edits.is_empty() {
+                        doc.pending_remote_updates
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Some((uri, edits))
+                    } else {
                         None
                     }
                 }
             }; // Lock dropped
 
-            // 4. SEND EDITS
+            // 6. SEND EDITS
             if let Some((uri, edits)) = notification_data {
                 if let Err(e) = editor_tx.send((uri, edits)).await {
                     crate::logger::log(&format!("Could not send refresh to editor: {}", e));
@@ -321,3 +325,12 @@ async fn merge_incoming(
         _ => {}
     }
 }
+d to write files: {}", e));
+            } else {
+                crate::logger::log(">> [FS] Project initialization complete.");
+            }
+        }
+        _ => {}
+    }
+}
+

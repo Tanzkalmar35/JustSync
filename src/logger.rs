@@ -8,7 +8,8 @@ pub fn log(msg: &str) {
         .open("/tmp/lsp_proxy.log")
         .unwrap();
 
-    if let Err(e) = writeln!(file, "{}", msg) {
-        eprintln!("Failed to write to log: {}", e);
+    if let Err(_e) = writeln!(file, "{}", msg) {
+        // LOG
+        // eprintln!("Failed to write to log: {}", e);
     }
 }
