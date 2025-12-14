@@ -278,11 +278,19 @@ async fn process_message(
         }
 
         NetMessage::Sync { uri, data } => {
-            crate::logger::log(&format!("Received Sync for {} ({} bytes)", uri, data.len()));
+            crate::logger::log(&format!(
+                ">> [Network] Received Sync for {} ({} bytes)",
+                uri,
+                data.len()
+            ));
 
             let edits_to_send = {
                 let mut guard = state.lock().unwrap();
                 let doc = guard.get_or_create(uri.clone(), "".to_string());
+
+                // 1. CAPTURE STATE BEFORE UPDATE
+                // We need this snapshot to calculate the diff later.
+                let old_rope = doc.content.clone();
 
                 let decode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     doc.crdt.merge_data_and_ff(&data).or_else(|_| {
@@ -298,40 +306,24 @@ async fn process_message(
                         let new_text_str = doc.crdt.branch.content().to_string();
                         let new_rope = ropey::Rope::from_str(&new_text_str);
 
-                        doc.content = new_rope.clone();
+                        // 2. SET EXPECTATION (Echo Guard)
                         doc.last_synced = Some((new_text_str.clone(), std::time::Instant::now()));
 
-                        // Increment Guard
-                        doc.pending_remote_updates
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        // 3. UPDATE STATE
+                        doc.content = new_rope.clone();
 
-                        // TODO: Hacky approach, replace with proper diff calculation
-                        // We replace the entire file content on every sync.
-                        // This guarantees Neovim matches our internal state.
-                        let full_range = crate::lsp::Range {
-                            start: crate::lsp::Position {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: crate::lsp::Position {
-                                line: 999999,
-                                character: 0,
-                            },
-                        };
-
-                        let edits = vec![crate::lsp::TextEdit {
-                            range: full_range,
-                            new_text: new_text_str,
-                        }];
+                        // 4. CALCULATE DIFF (Old vs New)
+                        // This calculates the minimal edits needed to transition Neovim.
+                        let edits = crate::diff::calculate_edits(&old_rope, &new_rope);
 
                         if !edits.is_empty() { Some(edits) } else { None }
                     }
                     Ok(Err(_)) => {
-                        crate::logger::log("Failed to merge patch");
+                        crate::logger::log("!! [Network] Failed to merge patch");
                         None
                     }
                     Err(_) => {
-                        crate::logger::log("CRITICAL: Decode panicked.");
+                        crate::logger::log("!! [Network] CRITICAL: Decode panicked.");
                         None
                     }
                 }
