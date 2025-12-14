@@ -1,27 +1,28 @@
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LspHeader {
     pub jsonrpc: String,
-    // MUST be Option. Responses (like the one causing the crash) do not have this field.
     pub method: Option<String>,
     pub id: Option<serde_json::Value>,
     pub params: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DidOpenParams {
     #[serde(rename = "textDocument")]
     pub text_document: TextDocumentItem,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TextDocumentItem {
     pub uri: String,
     pub text: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct DidChangeParams {
     #[serde(rename = "textDocument")]
     pub text_document: VersionedTextDocumentIdentifier,
@@ -29,13 +30,13 @@ pub struct DidChangeParams {
     pub content_changes: Vec<TextDocumentContentChangeEvent>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct VersionedTextDocumentIdentifier {
     pub uri: String,
     pub version: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TextDocumentContentChangeEvent {
     pub range: Option<Range>,
     pub text: String,
@@ -60,9 +61,21 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
-// Helper reader 
-use anyhow::{Context, Result, anyhow};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InitializeParams {
+    #[serde(rename = "rootUri")]
+    pub root_uri: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InitializeResult {
+    pub capabilities: ServerCapabilities,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServerCapabilities {
+    pub text_doc_sync: i32, // 1 = full, 2 = incremental
+}
 
 pub async fn read_message<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,

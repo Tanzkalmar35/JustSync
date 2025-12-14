@@ -1,27 +1,29 @@
-use std::{collections::HashMap, sync::atomic::AtomicUsize};
-
 use diamond_types::list::ListCRDT;
 use ropey::Rope;
+use std::{collections::HashMap, sync::atomic::AtomicUsize, time::Instant};
 
 pub struct Workspace {
     pub state: HashMap<String, Document>,
+    pub local_agent_id: String,
 }
 
 impl Workspace {
-    pub fn new() -> Self {
+    pub fn new(agent_id: String) -> Self {
         Self {
             state: HashMap::new(),
+            local_agent_id: agent_id,
         }
     }
 
-    pub fn get_mut(&mut self, uri: &str) -> Option<&mut Document> {
-        self.state.get_mut(uri)
-    }
-
     pub fn get_or_create(&mut self, uri: String, content: String) -> &mut Document {
-        self.state
-            .entry(uri.clone())
-            .or_insert_with(|| Document::new(uri, content))
+        if !self.state.contains_key(&uri) {
+            crate::logger::log(&format!("Key NOT FOUND: '{}'. Creating NEW.", uri));
+            self.state
+                .entry(uri.clone())
+                .or_insert_with(|| Document::new(uri, content))
+        } else {
+            self.state.get_mut(&uri).unwrap()
+        }
     }
 }
 
@@ -30,33 +32,53 @@ pub struct Document {
     pub content: Rope,
     pub crdt: ListCRDT,
     pub pending_remote_updates: AtomicUsize,
+    pub last_synced: Option<(String, Instant)>,
 }
 
 impl Document {
     pub fn new(uri: String, initial_content: String) -> Self {
         let mut crdt = ListCRDT::new();
-
-        // If there is initial content, we must "type" it into the CRDT
-        // so the CRDT state matches the Rope state.
         if !initial_content.is_empty() {
-            // Get the internal ID for "root" (start of doc) or a local agent
             let agent = crdt.get_or_create_agent_id("init");
             crdt.insert(agent, 0, &initial_content);
         }
-
         Self {
             uri,
             content: Rope::from_str(&initial_content),
             crdt,
             pending_remote_updates: AtomicUsize::new(0),
+            last_synced: None,
         }
     }
 
+    // [DEBUG] Call this to see exactly what is happening inside the doc
+    pub fn debug_dump(&self, label: &str) {
+        let rope_len = self.content.len_chars();
+        let crdt_len = self.crdt.len();
+
+        let rope_str = self.content.to_string().replace("\n", "\\n");
+        let crdt_str = self.crdt.branch.content().to_string().replace("\n", "\\n");
+
+        crate::logger::log(&format!("=== DEBUG [{}] ===", label));
+        crate::logger::log(&format!("Rope Len: {} | CRDT Len: {}", rope_len, crdt_len));
+        crate::logger::log(&format!("Rope: '{}'", rope_str));
+        crate::logger::log(&format!("CRDT: '{}'", crdt_str));
+
+        if rope_len != crdt_len || rope_str != crdt_str {
+            crate::logger::log("!!!! FATAL DESYNC DETECTED !!!!");
+        }
+        crate::logger::log("=========================");
+    }
+
     pub fn pos_to_offset(&self, line: usize, col: usize) -> usize {
-        // Safety: Handle line out of bounds gracefully or panic?
-        // For now, let's assume valid input, but in prod, use `try_line_to_char`.
+        let len_lines = self.content.len_lines();
+        if line >= len_lines {
+            return self.content.len_chars();
+        }
         let line_start = self.content.line_to_char(line);
-        line_start + col
+        let line_len = self.content.line(line).len_chars();
+        let safe_col = col.min(line_len);
+        (line_start + safe_col).min(self.content.len_chars())
     }
 
     pub fn get_offsets(
@@ -66,34 +88,46 @@ impl Document {
         end_line: usize,
         end_col: usize,
     ) -> (usize, usize) {
-        let start = self.pos_to_offset(start_line, start_col);
-        let end = self.pos_to_offset(end_line, end_col);
-        (start, end)
+        (
+            self.pos_to_offset(start_line, start_col),
+            self.pos_to_offset(end_line, end_col),
+        )
     }
 
-    // Update ONLY the Rope (The "View")
     pub fn update_rope(&mut self, start_idx: usize, end_idx: usize, text: &str) {
-        self.content.remove(start_idx..end_idx);
-        self.content.insert(start_idx, text);
-    }
-
-    // Update ONLY the CRDT (The "Truth")
-    // We pass the raw indices so we don't recalculate them (which might be wrong after rope update)
-    pub fn update_crdt(&mut self, start_idx: usize, end_idx: usize, text: &str) {
-        let agent = self.crdt.get_or_create_agent_id("local-user");
-
-        let len_to_delete = end_idx - start_idx;
-        if len_to_delete > 0 {
-            self.crdt
-                .delete(agent, start_idx..start_idx + len_to_delete);
+        let len = self.content.len_chars();
+        let s = start_idx.min(len);
+        let e = end_idx.min(len);
+        if s < e {
+            self.content.remove(s..e);
         }
-
         if !text.is_empty() {
-            self.crdt.insert(agent, start_idx, text);
+            self.content.insert(s, text);
         }
     }
 
-    // The Mirror Test
+    pub fn update_crdt(&mut self, start_idx: usize, end_idx: usize, text: &str, agent_id: &str) {
+        let agent = self.crdt.get_or_create_agent_id(agent_id);
+        let crdt_len = self.crdt.len();
+        let safe_start = start_idx.min(crdt_len);
+        let safe_end = end_idx.min(crdt_len);
+
+        // crate::logger::log(&format!(
+        //     ">> [CRDT Op] Range {}-{} (Len {}). Text '{}'",
+        //     safe_start,
+        //     safe_end,
+        //     crdt_len,
+        //     text.replace("\n", "\\n")
+        // ));
+
+        if safe_start < safe_end {
+            self.crdt.delete(agent, safe_start..safe_end);
+        }
+        if !text.is_empty() {
+            self.crdt.insert(agent, safe_start, text);
+        }
+    }
+
     pub fn is_synced(&self) -> bool {
         let crdt_text = self.crdt.branch.content().to_string();
         self.content.to_string() == crdt_text

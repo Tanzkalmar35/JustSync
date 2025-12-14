@@ -19,15 +19,11 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
         }
 
         // Calculate the Range in the OLD text
-        // op.old_range() gives us the start/end *character indices* (0-indexed flat offsets)
         let old_start_char_idx = op.old_range().start;
         let old_end_char_idx = op.old_range().end;
 
-        // We use Rope to convert flat char indices to (Line, Col)
-        // Note: Ropey handles unicode chars correctly here.
         let start_line = old.char_to_line(old_start_char_idx);
         let start_col = old_start_char_idx - old.line_to_char(start_line);
-
         let end_line = old.char_to_line(old_end_char_idx);
         let end_col = old_end_char_idx - old.line_to_char(end_line);
 
@@ -43,15 +39,11 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
         };
 
         // Extract the New Text
-        // op.new_range() gives us the indices in the NEW text.
-        // We assume `new_str` lines up with these indices.
         let new_start_char_idx = op.new_range().start;
         let new_end_char_idx = op.new_range().end;
-        
+
         // Slice the new string directly
         let new_text_fragment = if new_start_char_idx < new_end_char_idx {
-            // Safety: from_chars relies on the input strings remaining valid.
-            // Since we own new_str here, this slice is safe.
             new_str[new_start_char_idx..new_end_char_idx].to_string()
         } else {
             String::new()
@@ -66,9 +58,6 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     edits
 }
 
-// ----------------------------------------------------------------------
-// UNIT TESTS
-// ----------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,15 +105,15 @@ mod tests {
         assert_eq!(edits[0].range.end.line, 2);
         assert_eq!(edits[0].new_text, "");
     }
-    
+
     #[test]
     fn test_diff_unicode_emoji() {
         // Emojis can be tricky with char counts vs byte counts
         let old = Rope::from_str("Hello 🌍");
         let new = Rope::from_str("Hello World 🌍");
-        
+
         let edits = calculate_edits(&old, &new);
-        
+
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "World ");
         // "Hello " is 6 chars
