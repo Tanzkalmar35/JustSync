@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use crate::lsp::{TextDocumentContentChangeEvent, TextEdit};
 use crate::network::NetworkCommand;
 use crate::state::Workspace;
@@ -94,7 +96,7 @@ impl Core {
                     let mut files_to_write = Vec::new();
 
                     for (uri, patch) in files {
-                        // [FIX 1] Check if we are actually tracking this file (User has it open)
+                        // Check if we are actually tracking this file (User has it open)
                         let is_open = self.workspace.documents.contains_key(&uri);
 
                         // Hydrate Memory
@@ -106,10 +108,13 @@ impl Core {
                         files_to_write.push((uri.clone(), content));
 
                         // If it's not open, writing to disk (below) is sufficient.
-                        // Sending edits to an untracked file causes the "Double Apply" bug.
                         if is_open {
                             if let Some(edits) = edits_opt {
                                 let _ = self.editor_tx.send((uri, edits)).await;
+                            }
+                        } else {
+                            if edits_opt.is_some() {
+                                doc.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
                             }
                         }
                     }
@@ -140,7 +145,6 @@ impl Core {
 
         // Apply logic (The logic inside Document should return the binary patch if effective)
         if let Some(patch) = doc.apply_local_changes(changes) {
-            // CHANGE: Wrap in Enum
             crate::logger::log(&format!(
                 "-> [Core] Generated Patch for '{}' ({} bytes)",
                 uri,

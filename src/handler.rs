@@ -122,6 +122,7 @@ async fn send_edits_to_editor(
     // Construct the workspace/applyEdit JSON
     let msg = json!({
         "jsonrpc": "2.0",
+        "id": 1,
         "method": "workspace/applyEdit",
         "params": {
             "label": "JustSync Remote Update",

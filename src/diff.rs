@@ -1,5 +1,3 @@
-// src/diff.rs
-
 use crate::lsp::{Position, Range, TextEdit};
 use ropey::Rope;
 use similar::{DiffTag, TextDiff};
@@ -20,11 +18,6 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
         .take_while(|(a, b)| a == b)
         .count();
 
-    // Step B: Check if the REST matches perfectly
-    // If we just inserted text at `prefix_len`, then the suffixes should match exactly.
-    let old_suffix_start = prefix_len;
-    let new_suffix_start = prefix_len + (len_new.saturating_sub(len_old));
-
     // If it's a pure insertion:
     // Old: [Prefix] [Suffix]
     // New: [Prefix] [INSERTED] [Suffix]
@@ -35,7 +28,7 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
         let new_slice = new.slice((prefix_len + inserted_len)..);
 
         if old_slice == new_slice {
-            // SUCCESS: It is a clean insertion!
+            // Success: It is a clean insertion!
             let pos = offset_to_position(old, prefix_len);
             let inserted_text = new
                 .slice(prefix_len..(prefix_len + inserted_len))
@@ -59,7 +52,7 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
         let new_slice = new.slice(prefix_len..);
 
         if old_slice == new_slice {
-            // SUCCESS: It is a clean deletion!
+            // Success: It is a clean deletion!
             let start_pos = offset_to_position(old, prefix_len);
             let end_pos = offset_to_position(old, prefix_len + deleted_len);
 
