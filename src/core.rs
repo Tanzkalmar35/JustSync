@@ -1,5 +1,7 @@
+use std::fs;
 use std::sync::atomic::Ordering;
 
+use crate::logger;
 use crate::lsp::{TextDocumentContentChangeEvent, TextEdit};
 use crate::network::NetworkCommand;
 use crate::state::Workspace;
@@ -19,10 +21,21 @@ pub enum Event {
         patch: Vec<u8>,
     },
 
-    /// The user opened a file (Stdin)
+    /// Only for initial scan
+    LoadFromDisk {
+        uri: String,
+        content: String,
+    },
+
+    /// The user opened a file
     ClientDidOpen {
         uri: String,
         content: String,
+    },
+
+    /// The user closed a file
+    ClientDidClose {
+        uri: String,
     },
 
     /// We should stop the daemon
@@ -69,9 +82,16 @@ impl Core {
                 Event::RemotePatch { uri, patch } => {
                     self.handle_remote_patch(uri, patch).await;
                 }
-                Event::ClientDidOpen { uri, content } => {
-                    // Just update state, no network output needed usually
+                Event::LoadFromDisk { uri, content } => {
+                    // Just update state, don't load into editor
                     self.workspace.get_or_create(uri, content);
+                }
+                Event::ClientDidOpen { uri, content } => {
+                    self.workspace.get_or_create(uri.clone(), content);
+                    self.workspace.mark_open(uri);
+                }
+                Event::ClientDidClose { uri } => {
+                    self.workspace.mark_closed(&uri);
                 }
                 Event::PeerRequestedSync => {
                     crate::logger::log(">> [Core] Peer requested sync. Bundling state...");
@@ -87,14 +107,12 @@ impl Core {
                         .send(NetworkCommand::SendFullSyncResponse { files: snapshot })
                         .await;
                 }
-
                 Event::RemoteFullSync { files } => {
                     crate::logger::log(
                         ">> [Core] Received Full Sync. Hydrating & Writing to Disk...",
                     );
 
                     let mut files_to_write = Vec::new();
-
                     for (uri, patch) in files {
                         // Check if we are actually tracking this file (User has it open)
                         let is_open = self.workspace.documents.contains_key(&uri);
@@ -120,7 +138,6 @@ impl Core {
                     }
 
                     // Write to Disk
-                    // This ensures that when the user does something like ":e src/main.rs" in nvim, the file actually exists.
                     if let Err(e) = crate::fs::write_project_files(files_to_write) {
                         crate::logger::log(&format!(
                             "!! [Disk] Failed to write synced files: {}",
@@ -163,13 +180,28 @@ impl Core {
             uri,
             patch.len()
         ));
+        let is_open = self.workspace.is_open(&uri);
         let doc = self.workspace.get_or_create_empty(uri.clone());
+        let edits_opt = doc.apply_remote_patch(&patch);
 
-        // Apply logic
-        if let Some(edits) = doc.apply_remote_patch(&patch) {
-            // Side Effect: Tell the editor
-            if let Err(e) = self.editor_tx.send((uri, edits)).await {
-                eprintln!("Failed to send edits to editor actor: {}", e);
+        if is_open {
+            // Local editor has this file open, edits go to the editor
+            if let Some(edits) = edits_opt {
+                if let Err(e) = self.editor_tx.send((uri, edits)).await {
+                    logger::log(&format!("!! Failed to send edits to editor actor: {}", e));
+                }
+            }
+        } else {
+            // Local editor does not have this file open, so don't tell the editor, instead just write to disk.
+            if edits_opt.is_some() {
+                doc.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
+            }
+
+            let content = doc.content.to_string();
+            if let Err(e) = fs::write(&uri, content) {
+                logger::log(&format!("!! Failed to background-write to disk: {}", e));
+            } else {
+                logger::log(&format!(">> [Core] Background-wrote to disk: {}", uri));
             }
         }
     }

@@ -1,7 +1,7 @@
 use diamond_types::list::ListCRDT;
 use ropey::Rope;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -13,6 +13,7 @@ use crate::{
 pub struct Workspace {
     pub documents: HashMap<String, Document>,
     pub local_agent_id: String,
+    pub open_files: HashSet<String>,
 }
 
 impl Workspace {
@@ -20,6 +21,7 @@ impl Workspace {
         Self {
             documents: HashMap::new(),
             local_agent_id: agent_id,
+            open_files: HashSet::new(),
         }
     }
 
@@ -53,6 +55,18 @@ impl Workspace {
             results.push((uri.clone(), data));
         }
         results
+    }
+
+    pub fn mark_open(&mut self, uri: String) {
+        self.open_files.insert(uri);
+    }
+
+    pub fn mark_closed(&mut self, uri: &str) {
+        self.open_files.remove(uri);
+    }
+
+    pub fn is_open(&self, uri: &str) -> bool {
+        self.open_files.contains(uri)
     }
 }
 

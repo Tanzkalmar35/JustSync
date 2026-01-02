@@ -30,6 +30,17 @@ pub struct DidChangeParams {
     pub content_changes: Vec<TextDocumentContentChangeEvent>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct DidCloseParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentIdentifier,
+}
+
+#[derive(serde::Deserialize)]
+pub struct TextDocumentIdentifier {
+    pub uri: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct VersionedTextDocumentIdentifier {
     pub uri: String,

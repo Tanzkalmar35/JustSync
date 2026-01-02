@@ -1,8 +1,6 @@
-// src/handler.rs
-
 use crate::core::Event;
 use crate::logger;
-use crate::lsp::{self, DidChangeParams, DidOpenParams, LspHeader, TextEdit};
+use crate::lsp::{self, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader, TextEdit};
 use serde_json::json;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
@@ -96,6 +94,15 @@ async fn process_editor_message(body: &str, tx: &mpsc::Sender<Event>, root_dir: 
                                 changes: params.content_changes,
                             };
                             let _ = tx.send(event).await;
+                        }
+                    }
+                }
+                "textDocument/didClose" => {
+                    if let Some(params_val) = header.params {
+                        if let Ok(params) = serde_json::from_value::<DidCloseParams>(params_val) {
+                            let uri =
+                                crate::fs::to_relative_path(&params.text_document.uri, root_dir);
+                            let _ = tx.send(Event::ClientDidClose { uri }).await;
                         }
                     }
                 }

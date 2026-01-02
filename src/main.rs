@@ -51,7 +51,7 @@ pub async fn main() {
         for (uri, content) in files {
             // We inject these as events, just as if the user opened them
             // This populates the Core's state without needing backdoor access.
-            let _ = core_tx.send(Event::ClientDidOpen { uri, content }).await;
+            let _ = core_tx.send(Event::LoadFromDisk { uri, content }).await;
         }
     }
 
