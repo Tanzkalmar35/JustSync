@@ -1,8 +1,6 @@
-// src/network.rs
-
 use anyhow::Result;
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig, VarInt};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
@@ -43,13 +41,22 @@ pub async fn run(
     port: u16,
     core_tx: mpsc::Sender<Event>,
     mut net_rx: mpsc::Receiver<NetworkCommand>,
+    token: String,
+    server_certs: Option<Vec<CertificateDer<'static>>>,
+    server_key: Option<PrivateKeyDer<'static>>,
 ) {
     // Initialize QUIC Endpoint (Bind socket)
-    let endpoint = if mode == "host" {
-        init_host(port).expect("Failed to bind host port")
+    let endpoint_result = if mode == "host" {
+        init_host(
+            port,
+            server_certs.expect("Host needs certs"),
+            server_key.expect("Host needs key"),
+        )
     } else {
-        init_client(0).expect("Failed to bind client port")
+        init_client(0, &token)
     };
+
+    let endpoint = endpoint_result.expect("Failed to bind UDP port");
 
     // Establish Connection (Handshake)
     let connection = if mode == "host" {
@@ -58,7 +65,7 @@ pub async fn run(
             Some(incoming) => match incoming.await {
                 Ok(conn) => {
                     crate::logger::log(&format!(
-                        ">> [Network] Peer connected: {}",
+                        ">> [Network] Peer connected securely: {}",
                         conn.remote_address()
                     ));
                     conn
@@ -76,14 +83,18 @@ pub async fn run(
         let addr_str = if ip_str.contains(':') {
             ip_str
         } else {
-            format!("{}:4444", ip_str)
+            format!("{}:{}", ip_str, port)
         };
         let addr = addr_str.parse().expect("Invalid remote address format");
 
-        crate::logger::log(&format!(">> [Network] Connecting to {}...", addr));
+        crate::logger::log(&format!(
+            ">> [Network] Connecting to {} with Token...",
+            addr
+        ));
+
         match endpoint.connect(addr, "localhost").unwrap().await {
             Ok(conn) => {
-                crate::logger::log(">> [Network] Connected to Host.");
+                crate::logger::log(">> [Network] Connected to Host (Authenticated!).");
                 conn
             }
             Err(e) => {
@@ -93,6 +104,7 @@ pub async fn run(
         }
     };
 
+    // Protocol Logic
     if mode == "peer" {
         crate::logger::log(">> [Network] Sending RequestFullSync...");
         let msg = WireMessage::RequestFullSync;
@@ -106,7 +118,6 @@ pub async fn run(
     }
 
     // Start IO Loops
-    // We clone the connection handle for the sender task.
     let conn_sender = connection.clone();
 
     // LOOP A: Outbound (Core -> Network -> Wire)
@@ -123,7 +134,7 @@ pub async fn run(
 
             let bytes = serde_json::to_vec(&wire_msg).unwrap();
 
-            // Send logic (same as before)
+            // Send logic
             match conn_sender.open_uni().await {
                 Ok(mut stream) => {
                     let _ = stream.write_all(&bytes).await;
@@ -135,31 +146,27 @@ pub async fn run(
     });
 
     // LOOP B: Inbound (Wire -> Network -> Core)
-    // We run this on the current task
     loop {
         match connection.accept_uni().await {
             Ok(mut recv) => {
                 let tx = core_tx.clone();
                 tokio::spawn(async move {
-                    match recv.read_to_end(50 * 1024 * 1024).await {
-                        // Bump limit for full sync
+                    // 100mb hard limit
+                    match recv.read_to_end(100 * 1024 * 1024).await {
                         Ok(bytes) => {
                             if let Ok(wire_msg) = serde_json::from_slice::<WireMessage>(&bytes) {
                                 match wire_msg {
-                                    // Existing
                                     WireMessage::Patch { uri, data } => {
                                         logger::log(&format!(
-                                            ">> [Network] Sending patch for {}",
+                                            ">> [Network] Received patch for {}",
                                             uri
                                         ));
                                         let _ =
                                             tx.send(Event::RemotePatch { uri, patch: data }).await;
                                     }
-                                    // NEW: Host received a request
                                     WireMessage::RequestFullSync => {
                                         let _ = tx.send(Event::PeerRequestedSync).await;
                                     }
-                                    // NEW: Peer received the huge payload
                                     WireMessage::FullSyncResponse { files } => {
                                         let _ = tx.send(Event::RemoteFullSync { files }).await;
                                     }
@@ -180,103 +187,72 @@ pub async fn run(
 }
 
 // =========================================================================
-//  Configuration Boilerplate (TLS & QUIC)
+//  Configuration (TLS & QUIC)
 // =========================================================================
 
 fn make_transport_config() -> TransportConfig {
     let mut transport_config = TransportConfig::default();
-    transport_config.max_concurrent_uni_streams(VarInt::from_u32(100)); // Allow many concurrent patches
+    transport_config.max_concurrent_uni_streams(VarInt::from_u32(100));
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
     transport_config.max_idle_timeout(Some(VarInt::from_u32(30_000).into()));
     transport_config
 }
 
-fn init_host(port: u16) -> Result<Endpoint> {
-    let (server_config, _cert) = configure_server()?;
+/// Initializes the host with it's certificates
+fn init_host(
+    port: u16,
+    certs: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<Endpoint> {
+    // Build rustls config
+    let mut crypto = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
+
+    // Configure ALPN
+    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+
+    // Translate into QUINN server config
+    let server_crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
+    let mut server_config = ServerConfig::with_crypto(Arc::new(server_crypto));
+
+    // Configure transport options
+    server_config.transport_config(Arc::new(make_transport_config()));
+
+    // Bindings
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     let endpoint = Endpoint::server(server_config, addr)?;
-    crate::logger::log(&format!("Host listening on {}", endpoint.local_addr()?));
+
+    crate::logger::log(&format!("Host bound to {}", endpoint.local_addr()?));
     Ok(endpoint)
 }
 
-fn init_client(bind_port: u16) -> Result<Endpoint> {
-    let client_config = configure_client();
+/// Initializes client with the custom token verifier
+fn init_client(bind_port: u16, token: &str) -> Result<Endpoint> {
+    let client_config = configure_client(token);
+
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], bind_port));
     let mut endpoint = Endpoint::client(addr)?;
     endpoint.set_default_client_config(client_config);
+
     Ok(endpoint)
 }
 
-fn configure_server() -> Result<(ServerConfig, Vec<u8>)> {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
-    let cert_der = cert.cert;
-    let key_pair = cert.signing_key;
-    let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+fn configure_client(token: &str) -> ClientConfig {
+    // Use own verifier
+    let verifier = crate::crypto::TokenVerifier::new(token);
 
-    let mut config = ServerConfig::with_single_cert(vec![cert_der.clone().into()], private_key)?;
-    config.transport = Arc::new(make_transport_config());
-    Ok((config, cert_der.der().to_vec()))
-}
-
-fn configure_client() -> ClientConfig {
-    let crypto = rustls::ClientConfig::builder()
-        .with_root_certificates(rustls::RootCertStore::empty())
+    let mut crypto = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
 
-    let mut crypto = crypto;
-    // DANGER: We skip verification for this Alpha P2P tool.
-    // In production, use real CA certs or fingerprint pinning.
-    crypto
-        .dangerous()
-        .set_certificate_verifier(Arc::new(SkipServerVerification));
+    // ALPN has to match
+    crypto.alpn_protocols = vec![b"justsync".to_vec()];
 
     let mut config = ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap(),
     ));
     config.transport_config(Arc::new(make_transport_config()));
     config
-}
-
-// --- TLS Verification Skipper ---
-
-#[derive(Debug)]
-struct SkipServerVerification;
-
-impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _: &[u8],
-        _: &CertificateDer<'_>,
-        _: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _: &[u8],
-        _: &CertificateDer<'_>,
-        _: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PSS_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ED25519,
-        ]
-    }
 }

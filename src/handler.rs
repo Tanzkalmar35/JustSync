@@ -148,7 +148,6 @@ async fn write_rpc(stdout: &mut tokio::io::Stdout, msg: &str) {
     let _ = stdout.flush().await;
 }
 
-// Handshake logic separated out for cleanliness
 async fn perform_initialization_handshake(
     reader: &mut BufReader<tokio::io::Stdin>,
     stdout: &mut tokio::io::Stdout,
