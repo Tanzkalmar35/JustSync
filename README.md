@@ -22,30 +22,6 @@ It utilizes **CRDTs (Conflict-free Replicated Data Types)** for mathematical con
 
 ---
 
-## 🛠️ Architecture
-
-JustSync solves the "Split Brain" problem of distributed editing by maintaining a local "Truth" (CRDT) and a "View" (Rope) separately.
-
-```mermaid
-graph TD
-    User[User Input] -->|didChange| Handler
-    Handler -->|Filter| EchoGuard{Echo Guard}
-    
-    EchoGuard -->|Match & <200ms| Ignore[Ignore Echo]
-    EchoGuard -->|Mismatch| ApplyLocal
-    
-    ApplyLocal -->|Update| Rope["Rope (View)"]
-    ApplyLocal -->|Insert/Delete| CRDT["Diamond Types (Truth)"]
-    
-    CRDT -->|Oplog Patch| Network[QUIC Transport]
-    Network -->|Remote Patch| Peer
-    
-    Peer -->|Incoming Patch| Network
-    Network -->|Merge| CRDT
-    CRDT -->|Reconstruct| Rope
-    Rope -->|Diff Calc| Neovim["Editor View"]
-```
-
 ### A typical data flow would look something like
 
 ```mermaid
@@ -137,7 +113,7 @@ One of the hardest problems in LSP synchronization is the "Echo Loop," where the
 ### Build from Source
 
 ```Bash
-git clone [https://github.com/yourusername/justsync.git](https://github.com/yourusername/justsync.git)
+git clone [https://github.com/Tanzkalmar35/justsync.git](https://github.com/yourusername/justsync.git)
 cd justsync
 cargo build --release
 ```
@@ -145,26 +121,25 @@ cargo build --release
 The binary will be located at ./target/release/justsync.
 
 ## 💻 Usage
-JustSync operates in a Host-Peer model.
 
-1. Start the Host
-The host initializes the session and owns the authoritative project state initially.
+JustSync is designed to be used directly through your editor of choice via our dedicated extensions.
 
-```Bash
-# Listen on port 4444
-./justsync --host --port 4444
-```
+### Supported Editors
+*   **Neovim:** [JustSyncNvimAdapter](https://github.com/Tanzkalmar35/JustSyncNvimAdapter)
+*   **VS Code:** [JustSyncVSCode](https://github.com/Tanzkalmar35/justsync-vscode)
+*   **IntelliJ IDEA:** [JustSyncIntelliJ](https://github.com/Tanzkalmar35/justsync-jetbrains)
 
-2. Connect a Peer
-The peer connects via QUIC, performs a handshake, and downloads the full project state (CRDT history).
+### How to Connect
 
-```Bash
-# Connect to localhost (or remote IP)
-./justsync --connect 127.0.0.1:4444
-```
+**1. Start the Session (Host)**
+*   **VS Code / IntelliJ:** Click the **Start** button in the extension panel, select **Host**, and copy the generated **Secret Token**.
+*   **Neovim:** Run the command `:JustSyncStart`. The token will be displayed in the messages area.
 
-## 📝 Neovim Integration
-I already have a working plugin for neovim, it can be found under `https://github.com/Tanzkalmar35/JustSyncNvimAdapter`.
+**2. Join a Session (Peer)**
+> **⚠️ Important:** Peers must start in an **empty directory**. The initial sync will download the project state from the host.
+
+*   **VS Code / IntelliJ:** Click **Start**, select **Join**, enter the Host's **IP Address**, and paste the **Secret Token**.
+*   **Neovim:** Run `:JustSyncJoin`, then follow the prompts to enter the IP and Token.
 
 ## 📄 License
 This project is licensed under the MIT License.
