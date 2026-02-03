@@ -12,6 +12,12 @@ It utilizes **CRDTs (Conflict-free Replicated Data Types)** for mathematical con
 
 ---
 
+
+https://github.com/user-attachments/assets/9f55f365-05b3-486a-89fd-d1e441ab1f36
+
+
+---
+
 ## 🚀 Key Features
 
 * **Conflict-Free Editing:** Powered by [diamond-types](https://github.com/josephg/diamond-types), JustSync merges concurrent edits automatically without conflicts using state-of-the-art CRDTs.
