@@ -70,7 +70,7 @@ sequenceDiagram
     PeerCore->>PeerState: doc.apply_local_changes(changes)
 
     note right of PeerState: A. Update Rope (View)<br/>B. Update CRDT Oplog (Truth)<br/>C. Generate binary patch
-    PeerState-->>PeerCore: returns Option<Vec<u8>> (The Patch)
+    PeerState-->>PeerCore: returns Option[Vec[u8]] (The Patch)
 
     note over PeerCore, PeerNet: 5. Prepare for Network
     PeerCore->>PeerNet: channel send: NetworkCommand::BroadcastPatch { patch }
@@ -92,7 +92,7 @@ sequenceDiagram
     HostCore->>HostState: doc.apply_remote_patch(patch)
 
     note right of HostState: A. Decode patch into Oplog<br/>B. Fast-forward Branch (Checkout)<br/>C. Reconstruct Text & Calc Diff
-    HostState-->>HostCore: returns Option<Vec<TextEdit>> (Minimal Diff)
+    HostState-->>HostCore: returns Option[Vec[TextEdit]] (Minimal Diff)
 
     note over HostCore, HostHandler: 10. Prepare Editor Edits
     HostCore->>HostHandler: channel send: (uri, Vec<TextEdit>)
