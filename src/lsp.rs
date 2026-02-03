@@ -36,7 +36,7 @@ pub struct DidCloseParams {
     pub text_document: TextDocumentIdentifier,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TextDocumentIdentifier {
     pub uri: String,
 }
@@ -70,6 +70,13 @@ pub struct TextEdit {
     pub range: Range,
     #[serde(rename = "newText")]
     pub new_text: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CursorPositionParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentIdentifier,
+    pub position: Position,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

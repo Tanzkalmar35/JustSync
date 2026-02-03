@@ -1,15 +1,21 @@
 use crate::core::Event;
 use crate::logger;
-use crate::lsp::{self, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader, TextEdit};
+use crate::lsp::{self, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader, TextEdit, CursorPositionParams, Position};
 use serde_json::json;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
+
+#[derive(Debug)]
+pub enum EditorCommand {
+    ApplyEdits { uri: String, edits: Vec<TextEdit> },
+    RemoteCursor { uri: String, position: Position },
+}
 
 /// The main IO loop for the Editor.
 /// It bridges the gap between "JSON on Stdin" and "Events in Rust Channels".
 pub async fn run(
     core_tx: mpsc::Sender<Event>,
-    mut editor_rx: mpsc::Receiver<(String, Vec<TextEdit>)>,
+    mut editor_rx: mpsc::Receiver<EditorCommand>,
 ) {
     // Setup Stdin/Stdout
     let stdin = tokio::io::stdin();
@@ -43,8 +49,15 @@ pub async fn run(
             }
 
             // --- OUTBOUND: From Core (Remote Edits) ---
-            Some((uri, edits)) = editor_rx.recv() => {
-                send_edits_to_editor(&mut stdout, &uri, edits, &root_dir).await;
+            Some(cmd) = editor_rx.recv() => {
+                match cmd {
+                    EditorCommand::ApplyEdits { uri, edits } => {
+                         send_edits_to_editor(&mut stdout, &uri, edits, &root_dir).await;
+                    }
+                    EditorCommand::RemoteCursor { uri, position } => {
+                        send_cursor_to_editor(&mut stdout, &uri, position, &root_dir).await;
+                    }
+                }
             }
         }
     }
@@ -106,10 +119,38 @@ async fn process_editor_message(body: &str, tx: &mpsc::Sender<Event>, root_dir: 
                         }
                     }
                 }
+                "$/justsync/cursor" => {
+                    if let Some(params_val) = header.params {
+                        if let Ok(params) = serde_json::from_value::<CursorPositionParams>(params_val) {
+                             let uri = crate::fs::to_relative_path(&params.text_document.uri, root_dir);
+                             let _ = tx.send(Event::LocalCursorChange { uri, position: params.position }).await;
+                        }
+                    }
+                }
                 _ => { /* Ignore other LSP messages */ }
             }
         }
     }
+}
+
+async fn send_cursor_to_editor(
+    stdout: &mut tokio::io::Stdout,
+    uri: &str,
+    position: Position,
+    root_dir: &str,
+) {
+    let abs_uri = crate::fs::to_absolute_uri(uri, root_dir);
+    
+    let msg = json!({
+        "jsonrpc": "2.0",
+        "method": "$/justsync/remoteCursor",
+        "params": {
+            "uri": abs_uri,
+            "position": position
+        }
+    });
+
+    write_rpc(stdout, &msg.to_string()).await;
 }
 
 async fn send_edits_to_editor(

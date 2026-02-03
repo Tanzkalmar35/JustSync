@@ -2,9 +2,10 @@ use std::fs;
 use std::sync::atomic::Ordering;
 
 use crate::logger;
-use crate::lsp::{TextDocumentContentChangeEvent, TextEdit};
+use crate::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::network::NetworkCommand;
 use crate::state::Workspace;
+use crate::handler::EditorCommand;
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -38,6 +39,16 @@ pub enum Event {
         uri: String,
     },
 
+    LocalCursorChange {
+        uri: String,
+        position: Position,
+    },
+
+    RemoteCursorChange {
+        uri: String,
+        position: Position,
+    },
+
     /// We should stop the daemon
     Shutdown,
 
@@ -56,14 +67,14 @@ pub struct Core {
 
     // The Outputs
     network_tx: mpsc::Sender<NetworkCommand>, // Send patches to peers
-    editor_tx: mpsc::Sender<(String, Vec<TextEdit>)>, // Send edits to editor
+    editor_tx: mpsc::Sender<EditorCommand>, // Send edits to editor
 }
 
 impl Core {
     pub fn new(
         agent_id: String,
         network_tx: mpsc::Sender<NetworkCommand>,
-        editor_tx: mpsc::Sender<(String, Vec<TextEdit>)>,
+        editor_tx: mpsc::Sender<EditorCommand>,
     ) -> Self {
         Self {
             workspace: Workspace::new(agent_id),
@@ -93,6 +104,17 @@ impl Core {
                 Event::ClientDidClose { uri } => {
                     self.workspace.mark_closed(&uri);
                 }
+                Event::LocalCursorChange { uri, position } => {
+                    let _ = self
+                        .network_tx
+                        .send(NetworkCommand::BroadcastCursor { 
+                            uri, 
+                            position: (position.line, position.character) 
+                        }).await;
+                },
+                Event::RemoteCursorChange { uri, position } => {
+                    let _ = self.editor_tx.send(EditorCommand::RemoteCursor { uri, position }).await;
+                },
                 Event::PeerRequestedSync => {
                     crate::logger::log(">> [Core] Peer requested sync. Bundling state...");
                     let snapshot = self
@@ -128,7 +150,7 @@ impl Core {
                         // If it's not open, writing to disk (below) is sufficient.
                         if is_open {
                             if let Some(edits) = edits_opt {
-                                let _ = self.editor_tx.send((uri, edits)).await;
+                                let _ = self.editor_tx.send(EditorCommand::ApplyEdits { uri, edits }).await;
                             }
                         } else {
                             if edits_opt.is_some() {
@@ -187,7 +209,7 @@ impl Core {
         if is_open {
             // Local editor has this file open, edits go to the editor
             if let Some(edits) = edits_opt {
-                if let Err(e) = self.editor_tx.send((uri, edits)).await {
+                if let Err(e) = self.editor_tx.send(EditorCommand::ApplyEdits { uri, edits }).await {
                     logger::log(&format!("!! Failed to send edits to editor actor: {}", e));
                 }
             }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 
-use crate::{core::Event, logger};
+use crate::{core::Event, logger, lsp::Position};
 
 /// The packet we serialize and send over the QUIC stream.
 #[derive(Serialize, Deserialize, Debug)]
@@ -13,6 +13,11 @@ enum WireMessage {
     Patch {
         uri: String,
         data: Vec<u8>,
+    },
+
+    Cursor {
+        uri: String,
+        position: (usize, usize)
     },
 
     /// Peer -> Host: "I just joined, give me everything."
@@ -26,6 +31,7 @@ enum WireMessage {
 
 #[derive(Debug)]
 pub enum NetworkCommand {
+    BroadcastCursor { uri: String, position: (usize, usize) },
     BroadcastPatch { uri: String, patch: Vec<u8> },
     SendFullSyncResponse { files: Vec<(String, Vec<u8>)> },
 }
@@ -124,6 +130,9 @@ pub async fn run(
     let send_task = tokio::spawn(async move {
         while let Some(cmd) = net_rx.recv().await {
             let wire_msg = match cmd {
+                NetworkCommand::BroadcastCursor { uri, position } => {
+                    WireMessage::Cursor { uri, position }
+                }
                 NetworkCommand::BroadcastPatch { uri, patch } => {
                     WireMessage::Patch { uri, data: patch }
                 }
@@ -163,6 +172,13 @@ pub async fn run(
                                         ));
                                         let _ =
                                             tx.send(Event::RemotePatch { uri, patch: data }).await;
+                                    }
+                                    WireMessage::Cursor { uri, position } => {
+                                        let (line, char) = position;
+                                        let _ = tx.send(Event::RemoteCursorChange { 
+                                            uri, 
+                                            position: Position{ line, character: char } 
+                                        }).await;
                                     }
                                     WireMessage::RequestFullSync => {
                                         let _ = tx.send(Event::PeerRequestedSync).await;
