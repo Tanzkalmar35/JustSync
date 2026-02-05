@@ -21,3 +21,4 @@ uuid = {version = "1.19.0", features = ["v4", "fast-rng"]}
 walkdir = "2.5.0"
 ring = "0.17"
 hex = "0.4"
+proptest = "1.9.0"

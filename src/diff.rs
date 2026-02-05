@@ -3,7 +3,7 @@ use ropey::Rope;
 use similar::{DiffTag, TextDiff};
 
 pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
-    // Identity check
+    // Fast pointer comparison or deep comparison if pointers differ.
     if old == new {
         return Vec::new();
     }
@@ -11,81 +11,59 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     let len_old = old.len_chars();
     let len_new = new.len_chars();
 
-    // Step A: Find the first mismatch (Prefix Scan)
+    // Prefix Scan (Optimization)
+    // Find how many characters at the start are identical.
     let prefix_len = old
         .chars()
         .zip(new.chars())
         .take_while(|(a, b)| a == b)
         .count();
 
-    // If it's a pure insertion:
-    // Old: [Prefix] [Suffix]
-    // New: [Prefix] [INSERTED] [Suffix]
-    if len_new > len_old {
-        let inserted_len = len_new - len_old;
-        // Check if the suffix of OLD matches the suffix of NEW (after the insertion)
-        let old_slice = old.slice(prefix_len..);
-        let new_slice = new.slice((prefix_len + inserted_len)..);
-
-        if old_slice == new_slice {
-            // Success: It is a clean insertion!
-            let pos = offset_to_position(old, prefix_len);
-            let inserted_text = new
-                .slice(prefix_len..(prefix_len + inserted_len))
-                .to_string();
-
-            return vec![TextEdit {
-                range: Range {
-                    start: pos.clone(),
-                    end: pos,
-                },
-                new_text: inserted_text,
-            }];
-        }
-    }
-    // If it's a pure deletion:
-    // Old: [Prefix] [DELETED] [Suffix]
-    // New: [Prefix] [Suffix]
-    else if len_old > len_new {
-        let deleted_len = len_old - len_new;
-        let old_slice = old.slice((prefix_len + deleted_len)..);
-        let new_slice = new.slice(prefix_len..);
-
-        if old_slice == new_slice {
-            // Success: It is a clean deletion!
-            let start_pos = offset_to_position(old, prefix_len);
-            let end_pos = offset_to_position(old, prefix_len + deleted_len);
-
-            return vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: String::new(),
-            }];
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // FALLBACK: The "Dirty Middle" Diff
-    // Only used for complex replaces, auto-formatting, or scattered edits.
-    // -------------------------------------------------------------------------
-
-    // We already calculated the prefix_len. Now calculate suffix.
-    // We limit the suffix scan so it doesn't overlap the prefix we found.
+    // Suffix Scan (Optimization)
+    // Find how many characters at the end are identical.
+    // strictly ensure the suffix does not overlap with the prefix we just found.
     let common_suffix_len = old
-        .chars_at(len_old) // Start iterator at the end of OLD
-        .reversed() // Iterate backwards
-        .zip(new.chars_at(len_new).reversed()) // Start iterator at end of NEW and reverse
-        .take(len_old.min(len_new) - prefix_len) // Don't overlap with prefix
+        .chars_at(len_old) 
+        .reversed()
+        .zip(new.chars_at(len_new).reversed()) 
+        .take(len_old.min(len_new) - prefix_len)
         .take_while(|&(a, b)| a == b)
         .count();
 
+    // Calculate the "Dirty Middle" Boundaries
     let start = prefix_len;
     let old_end = len_old - common_suffix_len;
     let new_end = len_new - common_suffix_len;
 
-    // Allocate only the changed region
+    // Fast Path: Pure Insertion or Deletion
+    // If the middle of one side is empty, it's a simple insert/delete.
+    // We don't need the expensive Diff algorithm for this.
+    
+    // Case A: Pure Insertion
+    if start == old_end && start != new_end {
+        let inserted_text = new.slice(start..new_end).to_string();
+        let pos = offset_to_position(old, start);
+        
+        return vec![TextEdit {
+            range: Range { start: pos.clone(), end: pos },
+            new_text: inserted_text,
+        }];
+    }
+
+    // Case B: Pure Deletion
+    if start != old_end && start == new_end {
+        return vec![TextEdit {
+            range: Range {
+                start: offset_to_position(old, start),
+                end: offset_to_position(old, old_end),
+            },
+            new_text: String::new(),
+        }];
+    }
+
+    // Fallback: The "Dirty Middle" Diff
+    // Used for replacements, disjoint edits, or complex changes.
+    
     let old_middle = old.slice(start..old_end).to_string();
     let new_middle = new.slice(start..new_end).to_string();
 
@@ -97,22 +75,29 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
             continue;
         }
 
-        let local_start = op.old_range().start;
-        let local_end = op.old_range().end;
+        // Calculate global offsets in the 'old' rope
+        let local_old_start = op.old_range().start;
+        let local_old_end = op.old_range().end;
+        let global_old_start = start + local_old_start;
+        let global_old_end = start + local_old_end;
 
-        let global_start = start + local_start;
-        let global_end = start + local_end;
+        // Calculate global offsets in the 'new' rope 
+        let local_new_start = op.new_range().start;
+        let local_new_end = op.new_range().end;
+        let global_new_start = start + local_new_start;
+        let global_new_end = start + local_new_end;
 
-        let range = Range {
-            start: offset_to_position(old, global_start),
-            end: offset_to_position(old, global_end),
-        };
-
-        let new_text_fragment = &new_middle[op.new_range()];
+        // Extract text from rope
+        let new_text_fragment = new
+            .slice(global_new_start..global_new_end)
+            .to_string();
 
         edits.push(TextEdit {
-            range,
-            new_text: new_text_fragment.to_string(),
+            range: Range {
+                start: offset_to_position(old, global_old_start),
+                end: offset_to_position(old, global_old_end),
+            },
+            new_text: new_text_fragment,
         });
     }
 
@@ -127,5 +112,140 @@ fn offset_to_position(rope: &Rope, char_idx: usize) -> Position {
     Position {
         line: line_idx,
         character: col,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    macro_rules! pos {
+        ($l:expr, $c:expr) => { Position { line: $l, character: $c } }
+    }
+
+    // Helper to apply edits to a string
+    fn apply_edits_to_string(original: &str, edits: &[TextEdit]) -> String {
+        // apply edits from bottom to top so indices don't shift!
+        let mut sorted_edits = edits.to_vec();
+        sorted_edits.sort_by_key(|e| std::cmp::Reverse(e.range.start.line)); 
+        
+        let mut rope = Rope::from_str(original);
+        
+        // Sort explicitly by index descending
+        sorted_edits.sort_by(|a, b| {
+            let idx_a = position_to_offset(&rope, &a.range.start);
+            let idx_b = position_to_offset(&rope, &b.range.start);
+            idx_b.cmp(&idx_a) // Reverse order
+        });
+
+        for edit in sorted_edits {
+            let start_char = position_to_offset(&rope, &edit.range.start);
+            let end_char = position_to_offset(&rope, &edit.range.end);
+            
+            rope.remove(start_char..end_char);
+            rope.insert(start_char, &edit.new_text);
+        }
+        
+        rope.to_string()
+    }
+    
+    fn position_to_offset(rope: &Rope, pos: &Position) -> usize {
+        let line_char = rope.line_to_char(pos.line);
+        line_char + pos.character
+    }
+
+    proptest! {
+        // Run 1000 random scenarios
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+        
+        #[test]
+        fn test_diff_correctness_invariant(
+            old_text in "\\PC*",  // Random unicode string
+            new_text in "\\PC*"   // Another random unicode string
+        ) {
+            let old_rope = Rope::from_str(&old_text);
+            let new_rope = Rope::from_str(&new_text);
+
+            // act: Calculate edits
+            let edits = calculate_edits(&old_rope, &new_rope);
+
+            // assert: Applying edits to Old must result in New
+            let reconstructed = apply_edits_to_string(&old_text, &edits);
+            
+            prop_assert_eq!(
+                &reconstructed, 
+                &new_text, 
+                "\nFailed to reconstruct!\nOld: {:?}\nNew: {:?}\nEdits: {:?}\n",
+                old_text, new_text, edits
+            );
+        }
+    }
+
+    #[test]
+    fn test_offset_to_position_mapping() {
+        // Arrange
+        // Line 0: "Hello" (5 chars + 1 newline = 6 chars total)
+        // Line 1: "World" (5 chars)
+        // Total indices: 0 to 10
+        let text = "Hello\nWorld";
+        let rope = Rope::from_str(text);
+
+        let cases = vec![
+            // (input_offset, expected_output, description)
+            (0,  pos!(0, 0), "Start of file"),
+            (4,  pos!(0, 4), "End of first word"),
+            (5,  pos!(0, 5), "The newline character itself"),
+            (6,  pos!(1, 0), "Start of second line"),
+            (8,  pos!(1, 2), "Middle of second word"),
+            (10, pos!(1, 4), "Last character of file"),
+        ];
+
+        // Act & Assert loop
+        for (offset, expected, desc) in cases {
+            let actual = offset_to_position(&rope, offset);
+            
+            assert_eq!(
+                actual, 
+                expected, 
+                "Failed at case: '{}' with offset {}", 
+                desc, 
+                offset
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_out_of_bounds_panics() {
+        let rope = Rope::from_str("Small");
+        offset_to_position(&rope, 100);
+    }
+
+    proptest! {
+        #[test]
+        fn test_offset_position_roundtrip(text in "\\PC*") { 
+            // "\\PC*" generates any random unicode string
+            
+            let rope = Rope::from_str(&text);
+            let total_len = rope.len_chars();
+
+            // test every character index in this random string
+            for offset in 0..=total_len {
+                // act
+                let pos = offset_to_position(&rope, offset);
+
+                // assert
+
+                // Line index must be valid
+                prop_assert!(pos.line < rope.len_lines(), "Line index out of bounds");
+                
+                // Check the reverse math (Roundtrip)
+                let line_start = rope.line_to_char(pos.line);
+                let calculated_offset = line_start + pos.character;
+                
+                prop_assert_eq!(calculated_offset, offset, "Roundtrip failed!");
+            }
+        }
     }
 }

@@ -59,7 +59,7 @@ pub struct Range {
     pub end: Position,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub struct Position {
     pub line: usize,
     pub character: usize,
