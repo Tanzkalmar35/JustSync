@@ -111,6 +111,8 @@ One of the hardest problems in LSP synchronization is the "Echo Loop," where the
 
 ## 📦 Installation
 
+Be warned, the installation, especially for the host, is quite tedious. I'll try my best to make this easier in the future.
+
 ### Prerequisites
 
 - Rust Toolchain (latest stable)
@@ -119,27 +121,43 @@ One of the hardest problems in LSP synchronization is the "Echo Loop," where the
 ### Build from Source
 
 ```Bash
-git clone [https://github.com/Tanzkalmar35/justsync.git](https://github.com/yourusername/justsync.git)
+git clone https://github.com/Tanzkalmar35/justsync
 cd justsync
 cargo build --release
 ```
 
 The binary will be located at ./target/release/justsync.
 
+Next, you will have to make the binary accessible globally.
+
+#### Linux
+
+From the project root, run:
+
+```Bash
+cp target/release/JustSync /usr/local/bin/JustSync
+```
+
+### Additional setup
+
+The host has to make port 4444 publicly accessible. I personally have tested it only with port forwarding.
+
 ## 💻 Usage
 
-JustSync is designed to be used directly through your editor of choice via our dedicated extensions.
+JustSync is designed to be used directly through your editor of choice via one of the dedicated extensions.
 
 ### Supported Editors
 *   **Neovim:** [JustSyncNvimAdapter](https://github.com/Tanzkalmar35/JustSyncNvimAdapter)
-*   **VS Code:** [JustSyncVSCode](https://github.com/Tanzkalmar35/justsync-vscode)
-*   **IntelliJ IDEA:** [JustSyncIntelliJ](https://github.com/Tanzkalmar35/justsync-jetbrains)
+*   **VS Code:** [justsync-vscode](https://github.com/Tanzkalmar35/justsync-vscode)
+*   **IntelliJ IDEA:** [justsync-jetbrains](https://github.com/Tanzkalmar35/justsync-jetbrains)
 
 ### How to Connect
 
 **1. Start the Session (Host)**
 *   **VS Code / IntelliJ:** Click the **Start** button in the extension panel, select **Host**, and copy the generated **Secret Token**.
 *   **Neovim:** Run the command `:JustSyncStart`. The token will be displayed in the messages area.
+
+After that, the host has to find out it's public ip address, so that the peer can enter that.
 
 **2. Join a Session (Peer)**
 > **⚠️ Important:** Peers must start in an **empty directory**. The initial sync will download the project state from the host.
