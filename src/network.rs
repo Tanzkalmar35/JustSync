@@ -17,7 +17,7 @@ enum WireMessage {
 
     Cursor {
         uri: String,
-        position: (usize, usize)
+        position: (usize, usize),
     },
 
     /// Peer -> Host: "I just joined, give me everything."
@@ -31,9 +31,17 @@ enum WireMessage {
 
 #[derive(Debug)]
 pub enum NetworkCommand {
-    BroadcastCursor { uri: String, position: (usize, usize) },
-    BroadcastPatch { uri: String, patch: Vec<u8> },
-    SendFullSyncResponse { files: Vec<(String, Vec<u8>)> },
+    BroadcastCursor {
+        uri: String,
+        position: (usize, usize),
+    },
+    BroadcastPatch {
+        uri: String,
+        patch: Vec<u8>,
+    },
+    SendFullSyncResponse {
+        files: Vec<(String, Vec<u8>)>,
+    },
 }
 
 // =========================================================================
@@ -155,46 +163,42 @@ pub async fn run(
     });
 
     // LOOP B: Inbound (Wire -> Network -> Core)
-    loop {
-        match connection.accept_uni().await {
-            Ok(mut recv) => {
-                let tx = core_tx.clone();
-                tokio::spawn(async move {
-                    // 100mb hard limit
-                    match recv.read_to_end(100 * 1024 * 1024).await {
-                        Ok(bytes) => {
-                            if let Ok(wire_msg) = serde_json::from_slice::<WireMessage>(&bytes) {
-                                match wire_msg {
-                                    WireMessage::Patch { uri, data } => {
-                                        logger::log(&format!(
-                                            ">> [Network] Received patch for {}",
-                                            uri
-                                        ));
-                                        let _ =
-                                            tx.send(Event::RemotePatch { uri, patch: data }).await;
-                                    }
-                                    WireMessage::Cursor { uri, position } => {
-                                        let (line, char) = position;
-                                        let _ = tx.send(Event::RemoteCursorChange { 
-                                            uri, 
-                                            position: Position{ line, character: char } 
-                                        }).await;
-                                    }
-                                    WireMessage::RequestFullSync => {
-                                        let _ = tx.send(Event::PeerRequestedSync).await;
-                                    }
-                                    WireMessage::FullSyncResponse { files } => {
-                                        let _ = tx.send(Event::RemoteFullSync { files }).await;
-                                    }
-                                }
+    while let Ok(mut recv) = connection.accept_uni().await {
+        let tx = core_tx.clone();
+        tokio::spawn(async move {
+            // 100mb hard limit
+            match recv.read_to_end(100 * 1024 * 1024).await {
+                Ok(bytes) => {
+                    if let Ok(wire_msg) = serde_json::from_slice::<WireMessage>(&bytes) {
+                        match wire_msg {
+                            WireMessage::Patch { uri, data } => {
+                                logger::log(&format!(">> [Network] Received patch for {}", uri));
+                                let _ = tx.send(Event::RemotePatch { uri, patch: data }).await;
+                            }
+                            WireMessage::Cursor { uri, position } => {
+                                let (line, char) = position;
+                                let _ = tx
+                                    .send(Event::RemoteCursorChange {
+                                        uri,
+                                        position: Position {
+                                            line,
+                                            character: char,
+                                        },
+                                    })
+                                    .await;
+                            }
+                            WireMessage::RequestFullSync => {
+                                let _ = tx.send(Event::PeerRequestedSync).await;
+                            }
+                            WireMessage::FullSyncResponse { files } => {
+                                let _ = tx.send(Event::RemoteFullSync { files }).await;
                             }
                         }
-                        Err(e) => crate::logger::log(&format!("!! Read error: {}", e)),
                     }
-                });
+                }
+                Err(e) => crate::logger::log(&format!("!! Read error: {}", e)),
             }
-            Err(_) => break,
-        }
+        });
     }
 
     // Cleanup

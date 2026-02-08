@@ -99,25 +99,35 @@ pub async fn read_message<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
 ) -> Result<Option<String>> {
     let mut content_length: Option<usize> = None;
+    let mut header_lines_read = 0;
 
     loop {
         let mut line = String::new();
         let bytes_read = reader.read_line(&mut line).await?;
 
         if bytes_read == 0 {
+            if header_lines_read > 0 {
+                return Err(anyhow!("Connection closed mid-header!"));
+            }
             return Ok(None);
         }
+
+        header_lines_read += 1;
 
         if line.trim().is_empty() {
             break;
         }
 
-        if line.to_lowercase().starts_with("content-length:") {
-            let content_length_dirty = line
-                .split(":")
-                .last()
-                .ok_or_else(|| anyhow!("Content-Length header is malformed"))?;
-            content_length = Some(content_length_dirty.trim().parse::<usize>()?);
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("content-length") {
+            content_length = Some(
+                value
+                    .trim()
+                    .parse()
+                    .context("Content-Length header is not a number")?,
+            );
         }
     }
 
@@ -127,4 +137,112 @@ pub async fn read_message<R: AsyncRead + Unpin>(
     let body = String::from_utf8(body_buffer).context("LSP body was not valid UTF-8")?;
 
     Ok(Some(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    use tokio::io::BufReader;
+
+    async fn run_parser(input: &[u8]) -> Result<Option<String>> {
+        let cursor = Cursor::new(input);
+        let mut reader = BufReader::new(cursor);
+        read_message(&mut reader).await
+    }
+
+    // =========================================================================
+    //  HAPPY PATHS (These remain the same)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_valid_simple_message() {
+        let input = b"Content-Length: 5\r\n\r\nHello";
+        let result = run_parser(input).await.unwrap();
+        assert_eq!(result, Some("Hello".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_valid_with_extra_headers() {
+        let input = b"User-Agent: MockClient/1.0\r\ncontent-length: 5\r\nContent-Type: utf8\r\n\r\nWorld";
+        let result = run_parser(input).await.unwrap();
+        assert_eq!(result, Some("World".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_valid_whitespace_tolerance() {
+        let input = b"Content-Length:   4\r\n\r\ntest";
+        let result = run_parser(input).await.unwrap();
+        assert_eq!(result, Some("test".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_valid_empty_body() {
+        let input = b"Content-Length: 0\r\n\r\n";
+        let result = run_parser(input).await.unwrap();
+        assert_eq!(result, Some("".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_clean_eof() {
+        let input = b"";
+        let result = run_parser(input).await.unwrap();
+        assert_eq!(result, None);
+    }
+
+    // =========================================================================
+    //  EDGE CASES & ERRORS
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_error_missing_content_length() {
+        let input = b"User-Agent: Test\r\n\r\nHello";
+        let err = run_parser(input).await.unwrap_err();
+        assert_eq!(err.to_string(), "Missing Content-Length header");
+    }
+
+    #[tokio::test]
+    async fn test_error_malformed_header_value() {
+        let input = b"Content-Length: five\r\n\r\nHello";
+        let err = run_parser(input).await.unwrap_err();
+        assert!(err.to_string().contains("Content-Length header is not a number"));
+    }
+
+    #[tokio::test]
+    async fn test_error_body_too_short() {
+        let input = b"Content-Length: 10\r\n\r\n12345";
+        let err = run_parser(input).await.unwrap_err();
+        assert!(err.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[tokio::test]
+    async fn test_error_invalid_utf8_body() {
+        let input = b"Content-Length: 2\r\n\r\n\xFF\xFF";
+        let err = run_parser(input).await.unwrap_err();
+        assert_eq!(err.to_string(), "LSP body was not valid UTF-8");
+    }
+
+    // =========================================================================
+    //  RESILIENCE TESTS 
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_truncated_headers_return_error() {
+        // SCENARIO: Connection cuts halfway through headers.
+        let input = b"Content-Length: 5\r\nUser-Age"; 
+        let result = run_parser(input).await;
+        
+        // Assert that we now correctly catch this as an error
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Connection closed mid-header!");
+    }
+
+    #[tokio::test]
+    async fn test_colon_in_values_safe() {
+        // SCENARIO: A header has multiple colons.
+        let input = b"Host: localhost:8080\r\nContent-Length: 5\r\n\r\nHello";
+        let result = run_parser(input).await.unwrap();
+        
+        assert_eq!(result, Some("Hello".to_string()));
+    }
 }

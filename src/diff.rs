@@ -1,6 +1,6 @@
 use crate::lsp::{Position, Range, TextEdit};
+use dissimilar::Chunk;
 use ropey::Rope;
-use similar::{DiffTag, TextDiff};
 
 pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     // Fast pointer comparison or deep comparison if pointers differ.
@@ -23,9 +23,9 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     // Find how many characters at the end are identical.
     // strictly ensure the suffix does not overlap with the prefix we just found.
     let common_suffix_len = old
-        .chars_at(len_old) 
+        .chars_at(len_old)
         .reversed()
-        .zip(new.chars_at(len_new).reversed()) 
+        .zip(new.chars_at(len_new).reversed())
         .take(len_old.min(len_new) - prefix_len)
         .take_while(|&(a, b)| a == b)
         .count();
@@ -38,14 +38,17 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     // Fast Path: Pure Insertion or Deletion
     // If the middle of one side is empty, it's a simple insert/delete.
     // We don't need the expensive Diff algorithm for this.
-    
+
     // Case A: Pure Insertion
     if start == old_end && start != new_end {
         let inserted_text = new.slice(start..new_end).to_string();
         let pos = offset_to_position(old, start);
-        
+
         return vec![TextEdit {
-            range: Range { start: pos.clone(), end: pos },
+            range: Range {
+                start: pos.clone(),
+                end: pos,
+            },
             new_text: inserted_text,
         }];
     }
@@ -63,44 +66,54 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
 
     // Fallback: The "Dirty Middle" Diff
     // Used for replacements, disjoint edits, or complex changes.
-    
+
     let old_middle = old.slice(start..old_end).to_string();
     let new_middle = new.slice(start..new_end).to_string();
 
-    let diff = TextDiff::from_chars(&old_middle, &new_middle);
+    let chunks = dissimilar::diff(&old_middle, &new_middle);
+
     let mut edits = Vec::new();
+    let mut current_pos = start;
 
-    for op in diff.ops() {
-        if op.tag() == DiffTag::Equal {
-            continue;
+    for chunk in chunks {
+        match chunk {
+            Chunk::Equal(text) => {
+                // Just advance the cursor.
+                current_pos += text.chars().count();
+            }
+            Chunk::Delete(text) => {
+                let len = text.chars().count();
+                // Emit deletion from current_pos to current_pos + len
+                let start_pos = offset_to_position(old, current_pos);
+                let end_pos = offset_to_position(old, current_pos + len);
+
+                edits.push(TextEdit {
+                    range: Range {
+                        start: start_pos,
+                        end: end_pos,
+                    },
+                    new_text: String::new(),
+                });
+
+                // Advance cursor past the deleted text
+                current_pos += len;
+            }
+            Chunk::Insert(text) => {
+                // Emit insertion at current_pos
+                let pos = offset_to_position(old, current_pos);
+
+                edits.push(TextEdit {
+                    range: Range {
+                        start: pos.clone(),
+                        end: pos,
+                    },
+                    new_text: text.to_string(),
+                });
+                // Do NOT advance 'current_pos' because we inserted text at this spot; 
+                // the original text hasn't been consumed.
+            }
         }
-
-        // Calculate global offsets in the 'old' rope
-        let local_old_start = op.old_range().start;
-        let local_old_end = op.old_range().end;
-        let global_old_start = start + local_old_start;
-        let global_old_end = start + local_old_end;
-
-        // Calculate global offsets in the 'new' rope 
-        let local_new_start = op.new_range().start;
-        let local_new_end = op.new_range().end;
-        let global_new_start = start + local_new_start;
-        let global_new_end = start + local_new_end;
-
-        // Extract text from rope
-        let new_text_fragment = new
-            .slice(global_new_start..global_new_end)
-            .to_string();
-
-        edits.push(TextEdit {
-            range: Range {
-                start: offset_to_position(old, global_old_start),
-                end: offset_to_position(old, global_old_end),
-            },
-            new_text: new_text_fragment,
-        });
     }
-
     edits
 }
 
@@ -121,17 +134,22 @@ mod tests {
     use proptest::prelude::*;
 
     macro_rules! pos {
-        ($l:expr, $c:expr) => { Position { line: $l, character: $c } }
+        ($l:expr, $c:expr) => {
+            Position {
+                line: $l,
+                character: $c,
+            }
+        };
     }
 
     // Helper to apply edits to a string
     fn apply_edits_to_string(original: &str, edits: &[TextEdit]) -> String {
         // apply edits from bottom to top so indices don't shift!
         let mut sorted_edits = edits.to_vec();
-        sorted_edits.sort_by_key(|e| std::cmp::Reverse(e.range.start.line)); 
-        
+        sorted_edits.sort_by_key(|e| std::cmp::Reverse(e.range.start.line));
+
         let mut rope = Rope::from_str(original);
-        
+
         // Sort explicitly by index descending
         sorted_edits.sort_by(|a, b| {
             let idx_a = position_to_offset(&rope, &a.range.start);
@@ -142,14 +160,14 @@ mod tests {
         for edit in sorted_edits {
             let start_char = position_to_offset(&rope, &edit.range.start);
             let end_char = position_to_offset(&rope, &edit.range.end);
-            
+
             rope.remove(start_char..end_char);
             rope.insert(start_char, &edit.new_text);
         }
-        
+
         rope.to_string()
     }
-    
+
     fn position_to_offset(rope: &Rope, pos: &Position) -> usize {
         let line_char = rope.line_to_char(pos.line);
         line_char + pos.character
@@ -158,7 +176,7 @@ mod tests {
     proptest! {
         // Run 1000 random scenarios
         #![proptest_config(ProptestConfig::with_cases(1000))]
-        
+
         #[test]
         fn test_diff_correctness_invariant(
             old_text in "\\PC*",  // Random unicode string
@@ -172,10 +190,10 @@ mod tests {
 
             // assert: Applying edits to Old must result in New
             let reconstructed = apply_edits_to_string(&old_text, &edits);
-            
+
             prop_assert_eq!(
-                &reconstructed, 
-                &new_text, 
+                &reconstructed,
+                &new_text,
                 "\nFailed to reconstruct!\nOld: {:?}\nNew: {:?}\nEdits: {:?}\n",
                 old_text, new_text, edits
             );
@@ -193,24 +211,22 @@ mod tests {
 
         let cases = vec![
             // (input_offset, expected_output, description)
-            (0,  pos!(0, 0), "Start of file"),
-            (4,  pos!(0, 4), "End of first word"),
-            (5,  pos!(0, 5), "The newline character itself"),
-            (6,  pos!(1, 0), "Start of second line"),
-            (8,  pos!(1, 2), "Middle of second word"),
+            (0, pos!(0, 0), "Start of file"),
+            (4, pos!(0, 4), "End of first word"),
+            (5, pos!(0, 5), "The newline character itself"),
+            (6, pos!(1, 0), "Start of second line"),
+            (8, pos!(1, 2), "Middle of second word"),
             (10, pos!(1, 4), "Last character of file"),
         ];
 
         // Act & Assert loop
         for (offset, expected, desc) in cases {
             let actual = offset_to_position(&rope, offset);
-            
+
             assert_eq!(
-                actual, 
-                expected, 
-                "Failed at case: '{}' with offset {}", 
-                desc, 
-                offset
+                actual, expected,
+                "Failed at case: '{}' with offset {}",
+                desc, offset
             );
         }
     }
@@ -224,9 +240,9 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_offset_position_roundtrip(text in "\\PC*") { 
+        fn test_offset_position_roundtrip(text in "\\PC*") {
             // "\\PC*" generates any random unicode string
-            
+
             let rope = Rope::from_str(&text);
             let total_len = rope.len_chars();
 
@@ -239,11 +255,11 @@ mod tests {
 
                 // Line index must be valid
                 prop_assert!(pos.line < rope.len_lines(), "Line index out of bounds");
-                
+
                 // Check the reverse math (Roundtrip)
                 let line_start = rope.line_to_char(pos.line);
                 let calculated_offset = line_start + pos.character;
-                
+
                 prop_assert_eq!(calculated_offset, offset, "Roundtrip failed!");
             }
         }
