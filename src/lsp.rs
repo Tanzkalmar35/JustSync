@@ -164,7 +164,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_valid_with_extra_headers() {
-        let input = b"User-Agent: MockClient/1.0\r\ncontent-length: 5\r\nContent-Type: utf8\r\n\r\nWorld";
+        let input =
+            b"User-Agent: MockClient/1.0\r\ncontent-length: 5\r\nContent-Type: utf8\r\n\r\nWorld";
         let result = run_parser(input).await.unwrap();
         assert_eq!(result, Some("World".to_string()));
     }
@@ -205,14 +206,20 @@ mod tests {
     async fn test_error_malformed_header_value() {
         let input = b"Content-Length: five\r\n\r\nHello";
         let err = run_parser(input).await.unwrap_err();
-        assert!(err.to_string().contains("Content-Length header is not a number"));
+        assert!(
+            err.to_string()
+                .contains("Content-Length header is not a number")
+        );
     }
 
     #[tokio::test]
     async fn test_error_body_too_short() {
         let input = b"Content-Length: 10\r\n\r\n12345";
         let err = run_parser(input).await.unwrap_err();
-        assert!(err.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::UnexpectedEof);
+        assert!(
+            err.downcast_ref::<std::io::Error>().unwrap().kind()
+                == std::io::ErrorKind::UnexpectedEof
+        );
     }
 
     #[tokio::test]
@@ -223,18 +230,21 @@ mod tests {
     }
 
     // =========================================================================
-    //  RESILIENCE TESTS 
+    //  RESILIENCE TESTS
     // =========================================================================
 
     #[tokio::test]
     async fn test_truncated_headers_return_error() {
         // SCENARIO: Connection cuts halfway through headers.
-        let input = b"Content-Length: 5\r\nUser-Age"; 
+        let input = b"Content-Length: 5\r\nUser-Age";
         let result = run_parser(input).await;
-        
+
         // Assert that we now correctly catch this as an error
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Connection closed mid-header!");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Connection closed mid-header!"
+        );
     }
 
     #[tokio::test]
@@ -242,7 +252,7 @@ mod tests {
         // SCENARIO: A header has multiple colons.
         let input = b"Host: localhost:8080\r\nContent-Length: 5\r\n\r\nHello";
         let result = run_parser(input).await.unwrap();
-        
+
         assert_eq!(result, Some("Hello".to_string()));
     }
 }

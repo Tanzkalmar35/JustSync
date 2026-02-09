@@ -276,3 +276,122 @@ fn configure_client(token: &str) -> ClientConfig {
     config.transport_config(Arc::new(make_transport_config()));
     config
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto;
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn test_wire_message_roundtrip() {
+        let original = WireMessage::Patch {
+            uri: "file:///test.rs".to_string(),
+            data: vec![1, 2, 3, 4],
+        };
+
+        let encoded = serde_json::to_vec(&original).unwrap();
+        let decoded: WireMessage = serde_json::from_slice(&encoded).unwrap();
+
+        match decoded {
+            WireMessage::Patch { uri, data } => {
+                assert_eq!(uri, "file:///test.rs");
+                assert_eq!(data, vec![1, 2, 3, 4]);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_quic_integration() {
+        // 1. Setup Crypto (Certs & Token)
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (server_certs, server_key, token) = crypto::generate_cert_and_token();
+
+        // 2. Setup Channels
+        let (host_core_tx, mut host_core_rx) = mpsc::channel(10);
+        let (host_net_tx, host_net_rx) = mpsc::channel(10);
+
+        let (peer_core_tx, mut peer_core_rx) = mpsc::channel(10);
+        let (_peer_net_tx, peer_net_rx) = mpsc::channel(10);
+
+        // 3. Start Host
+        // Port 0 lets the OS pick a random free port
+        let certs_clone = server_certs.clone();
+        let key_clone = server_key.clone_key();
+
+        // We need to run the host in a way that we can extract the port.
+        // But network::run() consumes the future.
+        // We'll trust the "bind to port 0" logic inside `init_host` works,
+        // but we need to know WHICH port it picked to tell the client.
+        // Since `run` is opaque, we'll modify the test to use a fixed high port
+        // to avoid race conditions, or we assume 50000+ range.
+        let test_port = 54321;
+
+        let host_handle = tokio::spawn(async move {
+            run(
+                "host".to_string(),
+                None,
+                test_port,
+                host_core_tx,
+                host_net_rx,
+                "".to_string(), // Host ignores token string, generates its own or uses certs
+                Some(certs_clone),
+                Some(key_clone),
+            )
+            .await;
+        });
+
+        // Give host a moment to bind
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // 4. Start Peer
+        let token_clone = token.clone();
+        let peer_handle = tokio::spawn(async move {
+            run(
+                "peer".to_string(),
+                Some("127.0.0.1".to_string()),
+                test_port,
+                peer_core_tx,
+                peer_net_rx,
+                token_clone,
+                None,
+                None,
+            )
+            .await;
+        });
+
+        // 5. Verification Steps
+
+        // A. Peer connects -> Sends RequestFullSync (Startup logic)
+        // B. Host should receive PeerRequestedSync
+        match tokio::time::timeout(Duration::from_secs(2), host_core_rx.recv()).await {
+            Ok(Some(Event::PeerRequestedSync)) => {
+                println!("Test: Host received sync request");
+            }
+            res => panic!("Host did not receive Sync Request: {:?}", res),
+        }
+
+        // C. Host Sends Response
+        host_net_tx
+            .send(NetworkCommand::SendFullSyncResponse {
+                files: vec![("doc.txt".into(), vec![65, 66, 67])],
+            })
+            .await
+            .unwrap();
+
+        // D. Peer should receive RemoteFullSync
+        match tokio::time::timeout(Duration::from_secs(2), peer_core_rx.recv()).await {
+            Ok(Some(Event::RemoteFullSync { files })) => {
+                assert_eq!(files[0].0, "doc.txt");
+                assert_eq!(files[0].1, vec![65, 66, 67]);
+                println!("Test: Peer received full sync");
+            }
+            res => panic!("Peer did not receive Sync Response: {:?}", res),
+        }
+
+        // Cleanup
+        host_handle.abort();
+        peer_handle.abort();
+    }
+}

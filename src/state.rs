@@ -523,4 +523,48 @@ mod tests {
             assert_eq!(doc.content.to_string(), doc.crdt.branch.content().to_string(), "Rope and CRDT desynced!");
         }
     }
+
+    #[test]
+    fn test_patch_idempotency() {
+        // Applying the same patch twice should have no effect the second time
+        let mut doc_a = Document::new("uri".into(), "Init".into(), "A");
+        let mut doc_b = Document::new("uri".into(), "Init".into(), "B");
+
+        // A makes change
+        let change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 4,
+                },
+                end: Position {
+                    line: 0,
+                    character: 4,
+                },
+            }),
+            text: "ialized".to_string(),
+        };
+        let patch = doc_a.apply_local_changes(vec![change]).unwrap();
+
+        // B applies ONCE
+        let edits_1 = doc_b.apply_remote_patch(&patch);
+        assert!(edits_1.is_some());
+        assert_eq!(doc_b.content.to_string(), "Initialized");
+
+        // B applies TWICE (Duplicate packet)
+        let edits_2 = doc_b.apply_remote_patch(&patch);
+
+        // Diamond Types handles duplicates gracefully (idempotent),
+        // but depending on version it might return "no edits" or "empty edits".
+        // Crucially, the content must remain correct.
+        assert_eq!(doc_b.content.to_string(), "Initialized");
+
+        // If it detected it as already applied, it should ideally return None or empty vector
+        if let Some(e) = edits_2 {
+            assert!(
+                e.is_empty(),
+                "Should not generate text edits for duplicate patch"
+            );
+        }
+    }
 }

@@ -90,3 +90,52 @@ impl ServerCertVerifier for TokenVerifier {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustls::pki_types::{ServerName, UnixTime};
+
+    #[test]
+    fn test_token_verification_success() {
+        // 1. Generate a valid cert/token pair
+        let (certs, _, token) = generate_cert_and_token();
+        let cert = &certs[0];
+
+        // 2. Create verifier with the CORRECT token
+        let verifier = TokenVerifier::new(&token);
+
+        // 3. Verify
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let result = verifier.verify_server_cert(cert, &[], &server_name, &[], UnixTime::now());
+
+        assert!(result.is_ok(), "Verifier rejected a valid token/cert pair!");
+    }
+
+    #[test]
+    fn test_token_verification_failure() {
+        // 1. Generate a valid cert/token pair
+        let (certs, _, _) = generate_cert_and_token();
+        let cert = &certs[0];
+
+        // 2. Create verifier with a WRONG token
+        // (Just change the last char of the hash)
+        let mut wrong_token = "00".repeat(32);
+        // ensure it's valid hex but definitely not the hash
+        let verifier = TokenVerifier::new(&wrong_token);
+
+        // 3. Verify
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let result = verifier.verify_server_cert(cert, &[], &server_name, &[], UnixTime::now());
+
+        // 4. Assert Failure
+        assert!(result.is_err(), "Verifier accepted a WRONG token!");
+
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Token not matching"),
+            "Wrong error message: {}",
+            err
+        );
+    }
+}

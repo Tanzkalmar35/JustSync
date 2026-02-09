@@ -109,7 +109,7 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
                     },
                     new_text: text.to_string(),
                 });
-                // Do NOT advance 'current_pos' because we inserted text at this spot; 
+                // Do NOT advance 'current_pos' because we inserted text at this spot;
                 // the original text hasn't been consumed.
             }
         }
