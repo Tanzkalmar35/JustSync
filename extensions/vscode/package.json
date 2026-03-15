@@ -1,0 +1,26 @@
+{
+  "name": "justsync-vscode",
+  "displayName": "JustSync VsCode adapter",
+  "publisher": "local-dev",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "bundle-vs": "vsce package --allow-missing-repository --allow-star-activation",
+    "install-vs": "code --install-extension justsync-vscode-0.0.1.vsix --force"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "^16.0.0",
+    "typescript": "^5.0.0"
+  }
+}

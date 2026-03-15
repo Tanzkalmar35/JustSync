@@ -1,0 +1,21 @@
+<idea-plugin>
+    <id>com.github.tanzkalmar35.justsyncjetbrains</id>
+    <name>JustSync</name>
+    <vendor>tanzkalmar35</vendor>
+
+    <description><![CDATA[
+    JustSync adapter for JetBrains IDEs. Enables real-time P2P collaboration via LSP.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceImplementation="com.github.tanzkalmar35.justsyncjetbrains.services.JustSyncService"/>
+
+        <platform.lsp.serverSupportProvider implementation="com.github.tanzkalmar35.justsyncjetbrains.lsp.JustSyncLspServerSupportProvider"/>
+
+        <statusBarWidgetFactory
+                id="JustSyncStatusBar"
+                implementation="com.github.tanzkalmar35.justsyncjetbrains.ui.JustSyncStatusBarWidgetFactory"/>
+    </extensions>
+</idea-plugin>
