@@ -1,3 +1,8 @@
+pub mod connection;
+pub mod user;
+pub mod session;
+pub mod server;
+
 fn main() {
-    println!("Hello, world!");
+    println!("Starting relay server...");
 }
