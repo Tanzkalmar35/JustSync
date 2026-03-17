@@ -92,7 +92,7 @@ pub async fn main() {
     let net_port = ctx.port;
 
     tokio::spawn(async move {
-        crate::network::run(
+        let res = crate::network::run(
             net_mode,
             net_ip,
             net_port,
@@ -103,6 +103,10 @@ pub async fn main() {
             server_key,
         )
         .await;
+
+        if let Err(e) = res {
+            panic!("{}", e);
+        }
     });
 
     // --- EDITOR ADAPTER (Main Thread) ---
