@@ -1,11 +1,10 @@
-use anyhow::Result;
-use quinn::{
-    ClientConfig, ConnectionError, Endpoint, ServerConfig, TransportConfig, VarInt,
-};
+use anyhow::{Context, Result};
+use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
-use tokio::{sync::mpsc};
+use tokio::io::{AsyncReadExt, AsyncWriteExt}; // <--- ESSENTIAL TRAITS
+use tokio::sync::mpsc;
 
 use crate::{core::Event, logger, lsp::Position};
 
@@ -60,7 +59,7 @@ pub async fn run(
     token: String,
     server_certs: Option<Vec<CertificateDer<'static>>>,
     server_key: Option<PrivateKeyDer<'static>>,
-) -> Result<(), ConnectionError> {
+) -> anyhow::Result<()> { 
     // Initialize QUIC Endpoint (Bind socket)
     let endpoint_result = if mode == "host" {
         init_host(
@@ -88,7 +87,7 @@ pub async fn run(
                 }
                 Err(e) => {
                     crate::logger::log(&format!("!! [Network] Handshake failed: {}", e));
-                    return Err(e);
+                    return Err(e.into());
                 }
             },
             None => return Ok(()), // Endpoint closed
@@ -108,33 +107,37 @@ pub async fn run(
             addr
         ));
 
-        match endpoint.connect(addr, "localhost").unwrap().await {
+        match endpoint.connect(addr, "localhost")?.await {
             Ok(conn) => {
                 crate::logger::log(">> [Network] Connected to Host (Authenticated!).");
                 conn
             }
             Err(e) => {
                 crate::logger::log(&format!("!! [Network] Connection failed: {}", e));
-                return Err(e);
+                return Err(e.into());
             }
         }
     };
 
-    // Protocol Logic
+    // --- PERSISTENT STREAM SETUP ---
+    crate::logger::log(">> [Network] Opening persistent bi-directional stream...");
     let (mut send_stream, mut recv_stream) = if mode == "peer" {
         connection.open_bi().await?
     } else {
         connection.accept_bi().await?
     };
+    crate::logger::log(">> [Network] Stream established. Ready for sync.");
 
+    // Protocol Logic
     if mode == "peer" {
-        if let Err(e) = send_framed(&mut send_stream, &WireMessage::RequestFullSync).await {
-            logger::log(format!("Couldn't send initial sync request: {}", e).as_str());
-            return Err(ConnectionError::VersionMismatch);
-        }
+        crate::logger::log(">> [Network] Sending RequestFullSync...");
+        send_framed(&mut send_stream, &WireMessage::RequestFullSync).await?;
     }
 
-    // Outbound
+    // Start IO Loops
+    let core_tx_inbound = core_tx.clone();
+
+    // Outbound 
     let send_task = tokio::spawn(async move {
         while let Some(cmd) = net_rx.recv().await {
             let wire_msg = match cmd {
@@ -150,43 +153,44 @@ pub async fn run(
             };
 
             if let Err(e) = send_framed(&mut send_stream, &wire_msg).await {
-                logger::log(format!("Error: Could not send wiremsg: {:?}", e).as_str());
+                crate::logger::log(&format!("!! [Network] Write error: {}", e));
                 break;
             }
         }
     });
 
-    // Inbound
+    // Inbound 
     loop {
-        let tx = core_tx.clone();
-        // 100mb hard limit
         match recv_framed(&mut recv_stream).await {
-            Ok(msg) => match msg {
-                WireMessage::Patch { uri, data } => {
-                    logger::log(&format!(">> [Network] Received patch for {}", uri));
-                    let _ = tx.send(Event::RemotePatch { uri, patch: data }).await;
+            Ok(wire_msg) => {
+                let tx = core_tx_inbound.clone();
+                match wire_msg {
+                    WireMessage::Patch { uri, data } => {
+                        logger::log(&format!(">> [Network] Received patch for {}", uri));
+                        let _ = tx.send(Event::RemotePatch { uri, patch: data }).await;
+                    }
+                    WireMessage::Cursor { uri, position } => {
+                        let (line, char) = position;
+                        let _ = tx
+                            .send(Event::RemoteCursorChange {
+                                uri,
+                                position: Position {
+                                    line,
+                                    character: char,
+                                },
+                            })
+                            .await;
+                    }
+                    WireMessage::RequestFullSync => {
+                        let _ = tx.send(Event::PeerRequestedSync).await;
+                    }
+                    WireMessage::FullSyncResponse { files } => {
+                        let _ = tx.send(Event::RemoteFullSync { files }).await;
+                    }
                 }
-                WireMessage::Cursor { uri, position } => {
-                    let (line, char) = position;
-                    let _ = tx
-                        .send(Event::RemoteCursorChange {
-                            uri,
-                            position: Position {
-                                line,
-                                character: char,
-                            },
-                        })
-                        .await;
-                }
-                WireMessage::RequestFullSync => {
-                    let _ = tx.send(Event::PeerRequestedSync).await;
-                }
-                WireMessage::FullSyncResponse { files } => {
-                    let _ = tx.send(Event::RemoteFullSync { files }).await;
-                }
-            },
+            }
             Err(e) => {
-                crate::logger::log(&format!("!! Read error: {}", e));
+                crate::logger::log(&format!("!! [Network] Read error (connection closed): {}", e));
                 break;
             }
         }
@@ -195,36 +199,42 @@ pub async fn run(
     // Cleanup
     send_task.abort();
     let _ = core_tx.send(Event::Shutdown).await;
-    return Ok(());
+    Ok(())
 }
 
-async fn send_framed(send: &mut quinn::SendStream, msg: &WireMessage) -> anyhow::Result<()> {
+// =========================================================================
+//  Framing Helpers (Length-Prefix)
+// =========================================================================
+
+async fn send_framed(send: &mut quinn::SendStream, msg: &WireMessage) -> Result<()> {
     let bytes = serde_json::to_vec(msg)?;
     let len = bytes.len() as u32;
 
-    // Write 4-byte length prefix (Big Endian)
     send.write_all(&len.to_be_bytes()).await?;
-    // Write the actual JSON payload
     send.write_all(&bytes).await?;
     Ok(())
 }
 
-async fn recv_framed(recv: &mut quinn::RecvStream) -> anyhow::Result<WireMessage> {
-    // Read the 4-byte length
+async fn recv_framed(recv: &mut quinn::RecvStream) -> Result<WireMessage> {
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
 
-    // Read exactly 'len' bytes into a buffer
+    if len > 100 * 1024 * 1024 {
+        return Err(anyhow::anyhow!("Message too large (100MB limit)"));
+    }
+
     let mut buf = vec![0u8; len];
     recv.read_exact(&mut buf).await?;
 
-    Ok(serde_json::from_slice(&buf)?)
+    let msg = serde_json::from_slice(&buf)?;
+    Ok(msg)
 }
 
 // =========================================================================
 //  Configuration (TLS & QUIC)
 // =========================================================================
+
 
 fn make_transport_config() -> TransportConfig {
     let mut transport_config = TransportConfig::default();
