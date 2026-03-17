@@ -1,11 +1,14 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use crate::handler::EditorCommand;
 use crate::logger;
 use crate::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::network::NetworkCommand;
 use crate::state::Workspace;
+use ropey::Rope;
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -68,6 +71,9 @@ pub struct Core {
     // The Outputs
     network_tx: mpsc::Sender<NetworkCommand>, // Send patches to peers
     editor_tx: mpsc::Sender<EditorCommand>,   // Send edits to editor
+    //
+    dirty_files: HashSet<String>,
+    last_flushed_ropes: HashMap<String, Rope>,
 }
 
 impl Core {
@@ -80,101 +86,113 @@ impl Core {
             workspace: Workspace::new(agent_id),
             network_tx,
             editor_tx,
+            dirty_files: HashSet::new(),
+            last_flushed_ropes: HashMap::new(),
         }
     }
 
     /// The Main Loop: Process one event at a time.
     pub async fn run(mut self, mut rx: mpsc::Receiver<Event>) {
-        while let Some(event) = rx.recv().await {
-            match event {
-                Event::LocalChange { uri, changes } => {
-                    self.handle_local_change(uri, changes).await;
-                }
-                Event::RemotePatch { uri, patch } => {
-                    self.handle_remote_patch(uri, patch).await;
-                }
-                Event::LoadFromDisk { uri, content } => {
-                    // Just update state, don't load into editor
-                    self.workspace.get_or_create(uri, content);
-                }
-                Event::ClientDidOpen { uri, content } => {
-                    self.workspace.get_or_create(uri.clone(), content);
-                    self.workspace.mark_open(uri);
-                }
-                Event::ClientDidClose { uri } => {
-                    self.workspace.mark_closed(&uri);
-                }
-                Event::LocalCursorChange { uri, position } => {
-                    let _ = self
-                        .network_tx
-                        .send(NetworkCommand::BroadcastCursor {
-                            uri,
-                            position: (position.line, position.character),
-                        })
-                        .await;
-                }
-                Event::RemoteCursorChange { uri, position } => {
-                    let _ = self
-                        .editor_tx
-                        .send(EditorCommand::RemoteCursor { uri, position })
-                        .await;
-                }
-                Event::PeerRequestedSync => {
-                    crate::logger::log(">> [Core] Peer requested sync. Bundling state...");
-                    let snapshot = self
-                        .workspace
-                        .get_snapshot()
-                        .into_iter()
-                        .filter(|(uri, _)| !uri.is_empty() && uri != "/")
-                        .collect();
+        let mut flush_timer = tokio::time::interval(Duration::from_millis(5));
 
-                    let _ = self
-                        .network_tx
-                        .send(NetworkCommand::SendFullSyncResponse { files: snapshot })
-                        .await;
-                }
-                Event::RemoteFullSync { files } => {
-                    crate::logger::log(
-                        ">> [Core] Received Full Sync. Hydrating & Writing to Disk...",
-                    );
-
-                    let mut files_to_write = Vec::new();
-                    for (uri, patch) in files {
-                        // Check if we are actually tracking this file (User has it open)
-                        let is_open = self.workspace.documents.contains_key(&uri);
-
-                        // Hydrate Memory
-                        let doc = self.workspace.get_or_create_empty(uri.clone());
-                        let edits_opt = doc.apply_remote_patch(&patch);
-
-                        // Capture for Disk
-                        let content = doc.content.to_string();
-                        files_to_write.push((uri.clone(), content));
-
-                        // If it's not open, writing to disk (below) is sufficient.
-                        if is_open {
-                            if let Some(edits) = edits_opt {
-                                let _ = self
-                                    .editor_tx
-                                    .send(EditorCommand::ApplyEdits { uri, edits })
-                                    .await;
-                            }
-                        } else if edits_opt.is_some() {
-                            doc.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
+        loop {
+            tokio::select! {
+                Some(event) = rx.recv() => {
+                    match event {
+                        Event::LocalChange { uri, changes } => {
+                            self.handle_local_change(uri, changes).await;
                         }
-                    }
+                        Event::RemotePatch { uri, patch } => {
+                            self.handle_remote_patch(uri, patch).await;
+                        }
+                        Event::LoadFromDisk { uri, content } => {
+                            // Just update state, don't load into editor
+                            self.workspace.get_or_create(uri, content);
+                        }
+                        Event::ClientDidOpen { uri, content } => {
+                            self.workspace.get_or_create(uri.clone(), content);
+                            self.workspace.mark_open(uri);
+                        }
+                        Event::ClientDidClose { uri } => {
+                            self.workspace.mark_closed(&uri);
+                        }
+                        Event::LocalCursorChange { uri, position } => {
+                            let _ = self
+                                .network_tx
+                                .send(NetworkCommand::BroadcastCursor {
+                                    uri,
+                                    position: (position.line, position.character),
+                                })
+                                .await;
+                        }
+                        Event::RemoteCursorChange { uri, position } => {
+                            let _ = self
+                                .editor_tx
+                                .send(EditorCommand::RemoteCursor { uri, position })
+                                .await;
+                        }
+                        Event::PeerRequestedSync => {
+                            crate::logger::log(">> [Core] Peer requested sync. Bundling state...");
+                            let snapshot = self
+                                .workspace
+                                .get_snapshot()
+                                .into_iter()
+                                .filter(|(uri, _)| !uri.is_empty() && uri != "/")
+                                .collect();
 
-                    // Write to Disk
-                    if let Err(e) = crate::fs::write_project_files(files_to_write) {
-                        crate::logger::log(&format!(
-                            "!! [Disk] Failed to write synced files: {}",
-                            e
-                        ));
-                    } else {
-                        crate::logger::log(">> [Disk] Full sync written to storage.");
+                            let _ = self
+                                .network_tx
+                                .send(NetworkCommand::SendFullSyncResponse { files: snapshot })
+                                .await;
+                        }
+                        Event::RemoteFullSync { files } => {
+                            crate::logger::log(
+                                ">> [Core] Received Full Sync. Hydrating & Writing to Disk...",
+                            );
+
+                            let mut files_to_write = Vec::new();
+                            for (uri, patch) in files {
+                                // Check if we are actually tracking this file (User has it open)
+                                let is_open = self.workspace.documents.contains_key(&uri);
+
+                                // Hydrate Memory
+                                let doc = self.workspace.get_or_create_empty(uri.clone());
+                                let edits_opt = doc.apply_remote_patch(&patch);
+
+                                // Capture for Disk
+                                let content = doc.content.to_string();
+                                files_to_write.push((uri.clone(), content));
+
+                                // If it's not open, writing to disk (below) is sufficient.
+                                if is_open {
+                                    if let Some(edits) = edits_opt {
+                                        let _ = self
+                                            .editor_tx
+                                            .send(EditorCommand::ApplyEdits { uri, edits })
+                                            .await;
+                                    }
+                                } else if edits_opt.is_some() {
+                                    doc.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
+                                }
+                            }
+
+                            // Write to Disk
+                            if let Err(e) = crate::fs::write_project_files(files_to_write) {
+                                crate::logger::log(&format!(
+                                    "!! [Disk] Failed to write synced files: {}",
+                                    e
+                                ));
+                            } else {
+                                crate::logger::log(">> [Disk] Full sync written to storage.");
+                            }
+                        }
+                        Event::Shutdown => break,
                     }
                 }
-                Event::Shutdown => break,
+
+                _ = flush_timer.tick() => {
+                    self.flush_dirty_files().await;
+                }
             }
         }
     }
@@ -188,12 +206,14 @@ impl Core {
         let doc = self.workspace.get_or_create_empty(uri.clone());
 
         // Apply logic (The logic inside Document should return the binary patch if effective)
+        let uri_ref = uri.clone();
         if let Some(patch) = doc.apply_local_changes(changes) {
             crate::logger::log(&format!(
                 "-> [Core] Generated Patch for '{}' ({} bytes)",
                 uri,
                 patch.len()
             ));
+            self.last_flushed_ropes.insert(uri_ref, doc.content.clone());
             let _ = self
                 .network_tx
                 .send(NetworkCommand::BroadcastPatch { uri, patch })
@@ -202,37 +222,35 @@ impl Core {
     }
 
     async fn handle_remote_patch(&mut self, uri: String, patch: Vec<u8>) {
-        crate::logger::log(&format!(
-            "<- [Core] Received Patch for '{}' ({} bytes)",
-            uri,
-            patch.len()
-        ));
-        let is_open = self.workspace.is_open(&uri);
         let doc = self.workspace.get_or_create_empty(uri.clone());
-        let edits_opt = doc.apply_remote_patch(&patch);
+        let _ = doc.apply_remote_patch(&patch);
 
-        if is_open {
-            // Local editor has this file open, edits go to the editor
-            if let Some(edits) = edits_opt {
-                if let Err(e) = self
+        if self.workspace.is_open(&uri) {
+            self.dirty_files.insert(uri);
+        }
+    }
+
+    async fn flush_dirty_files(&mut self) {
+        for uri in self.dirty_files.drain().collect::<Vec<_>>() {
+            let doc = self.workspace.get_or_create_empty(uri.clone());
+
+            let old_rope = self
+                .last_flushed_ropes
+                .entry(uri.clone())
+                .or_insert_with(|| Rope::from_str(""));
+            let edits = crate::diff::calculate_edits(old_rope, &doc.content);
+
+            if !edits.is_empty() {
+                *old_rope = doc.content.clone();
+
+                let _ = self
                     .editor_tx
-                    .send(EditorCommand::ApplyEdits { uri, edits })
-                    .await
-                {
-                    logger::log(&format!("!! Failed to send edits to editor actor: {}", e));
-                }
-            }
-        } else {
-            // Local editor does not have this file open, so don't tell the editor, instead just write to disk.
-            if edits_opt.is_some() {
-                doc.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
-            }
-
-            let content = doc.content.to_string();
-            if let Err(e) = fs::write(&uri, content) {
-                logger::log(&format!("!! Failed to background-write to disk: {}", e));
-            } else {
-                logger::log(&format!(">> [Core] Background-wrote to disk: {}", uri));
+                    .send(EditorCommand::ApplyEdits {
+                        uri: uri.clone(),
+                        edits,
+                    })
+                    .await;
+                doc.pending_remote_updates.fetch_add(1, Ordering::SeqCst);
             }
         }
     }
