@@ -1,21 +1,37 @@
-use crate::session::{Session};
+use dashmap::DashMap;
+use std::sync::Arc;
 
+use crate::session::Session;
 
+#[derive(Clone)]
 pub struct Server {
-    sessions: Vec<Session>
+    // Session name -> Session
+    sessions: Arc<DashMap<String, Session>>,
 }
 
 impl Server {
-    pub fn register_session(&mut self, s: Session) {
-        self.sessions.push(s);
+    pub fn setup() -> Self {
+        Self {
+            sessions: Arc::new(DashMap::new()),
+        }
     }
 
-    pub fn deregister_session(&mut self, s: Session) -> Result<(), String> {
-        if !self.sessions.contains(&s) { 
-            return Err(String::from("Error deregistering session - No session to deregister found!"));
+    pub fn register_session(&self, session: Session) {
+        self.sessions.insert(session.name.clone(), session);
+    }
+
+    pub fn deregister_session(&self, s: String) -> Result<(), String> {
+        if !self.sessions.contains_key(&s) {
+            return Err(String::from(
+                "Error deregistering session - No session to deregister found!",
+            ));
         }
 
-        self.sessions.retain(|session| session.name != s.name);
+        self.sessions.remove(&s);
         Ok(())
+    }
+
+    pub fn find_session(&self, name: &str) -> Option<Session> {
+        self.sessions.get(name).map(|s| s.value().clone())
     }
 }

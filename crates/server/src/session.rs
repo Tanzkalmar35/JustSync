@@ -1,18 +1,17 @@
+use quinn::{Connection, SendStream};
 use rand::RngExt;
 
-use crate::{connection::Connection, session, user::{Host, Peer}};
+use crate::connection::connect_to_host;
 
-
+#[derive(Clone)]
 pub struct Session {
-    // List of room names
     pub name: String,
     key: String,
-    host: Host,
-    connections: Vec<Connection>
+    pub host: Connection,
 }
 
 impl Session {
-    pub fn new(host: Host, key: String) -> Self {
+    pub fn new(host: Connection, key: String) -> Self {
         let names = petname::petname(2, "-").expect("petname session name generation failed!");
         let mut rng = rand::rng();
         let number: u16 = rng.random_range(100..1000);
@@ -23,24 +22,27 @@ impl Session {
             name: session_name,
             key,
             host,
-            connections: vec![]
         }
     }
 
-    pub fn join(&mut self, peer: Peer, key: String) -> Result<(), String> {
+    pub async fn join(
+        &self,
+        peer: Connection,
+        key: String,
+        send: &mut SendStream,
+    ) -> Result<(), String> {
         if !self.key.eq(&key) {
             return Err(String::from("Error joining session - invalid key"));
         }
 
-        // Patch host and peer together ("extension cord")
+        // Send an "OK" to the peer
+        send.write_all(b"{\"status\":\"ok\"}").await.expect("Couldn't report status");
+        send.finish();
 
-        // Add patch to self.connections
+        tokio::spawn(connect_to_host(self.host.clone(), peer));
 
         Ok(())
     }
-
-    // pub fn leave(&mut self, peer: Peer) -> Result<(), String> {
-    // }
 }
 
 impl PartialEq for Session {
