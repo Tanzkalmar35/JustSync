@@ -1,7 +1,7 @@
 local M = {}
 
 M.config = {
-    cmd_path = "justsync", 
+    cmd_path = "justsync",
     log_level = vim.log.levels.INFO,
 }
 
@@ -18,8 +18,8 @@ local function setup_buffer_autocommands(bufnr)
     vim.api.nvim_create_autocmd({ "CursorHold", "FocusGained", "BufEnter" }, {
         group = group,
         buffer = bufnr,
-        callback = function() 
-            vim.cmd("checktime") 
+        callback = function()
+            vim.cmd("checktime")
         end
     })
 end
@@ -27,7 +27,7 @@ end
 local function status_msg(msg, is_error)
     local prefix = "[JustSync] "
     local hl = is_error and "ErrorMsg" or "Question"
-    vim.api.nvim_echo({{prefix, "Identifier"}, {msg, hl}}, true, {})
+    vim.api.nvim_echo({ { prefix, "Identifier" }, { msg, hl } }, true, {})
 end
 
 local function handle_remote_cursor(err, result, ctx, config)
@@ -38,11 +38,11 @@ local function handle_remote_cursor(err, result, ctx, config)
     local position = result.position
     local uri = raw_uri:match("^%w+://") and raw_uri or vim.uri_from_fname(raw_uri)
     local bufnr = vim.uri_to_bufnr(uri)
-    
+
     if not vim.api.nvim_buf_is_loaded(bufnr) then return end
 
     vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
-    
+
     -- Draw the remote cursor
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, position.line, position.character, {
         end_col = position.character + 1,
@@ -50,7 +50,7 @@ local function handle_remote_cursor(err, result, ctx, config)
         hl_mode = 'replace',
         priority = 1000,
         -- Add a virtual text "cursor" if the character is empty (e.g. end of line)
-        virt_text = {{ "┃", "JustSyncRemoteCursor" }},
+        virt_text = { { "┃", "JustSyncRemoteCursor" } },
         virt_text_pos = "overlay",
     })
 end
@@ -59,14 +59,14 @@ local function scan_log_for_token()
     local log_path = vim.lsp.get_log_path()
     local file = io.open(log_path, "r")
     if not file then return false end
-    
+
     local size = file:seek("end")
     local start_pos = math.max(0, size - 5000)
     file:seek("set", start_pos)
-    
+
     local content = file:read("*a")
     file:close()
-    
+
     if content then
         for line in content:gmatch("[^\r\n]+") do
             if line:find("Token") then
@@ -79,7 +79,7 @@ local function scan_log_for_token()
 end
 
 local function launch_client(args, mode_name)
-    local root_dir = vim.fs.dirname(vim.fs.find({'.git', 'Cargo.toml', 'package.json'}, { upward = true })[1])
+    local root_dir = vim.fs.dirname(vim.fs.find({ '.git', 'Cargo.toml', 'package.json' }, { upward = true })[1])
     if not root_dir then root_dir = vim.fn.getcwd() end
 
     local capabilities = vim.lsp.protocol.make_client_capabilities()
@@ -98,7 +98,7 @@ local function launch_client(args, mode_name)
         flags = { debounce_text_changes = 150 },
         handlers = {
             ['$/justsync/remoteCursor'] = handle_remote_cursor,
-            ['window/showMessage'] = function(_, result) 
+            ['window/showMessage'] = function(_, result)
                 if result then status_msg(result.message, result.type == 1) end
             end,
             ['window/logMessage'] = function(_, result)
@@ -110,14 +110,17 @@ local function launch_client(args, mode_name)
         on_attach = function(client, bufnr)
             setup_buffer_autocommands(bufnr)
             status_msg("JustSync Attached (" .. mode_name .. ")")
-            
+
             if mode_name == "Host" then
                 local timer = vim.loop.new_timer()
                 local count = 0
                 if timer then
-                    timer:start(1000, 1000, function() 
+                    timer:start(1000, 1000, function()
                         count = count + 1
-                        if count > 20 then timer:close() return end
+                        if count > 20 then
+                            timer:close()
+                            return
+                        end
                         vim.schedule(function()
                             if scan_log_for_token() then timer:close() end
                         end)
@@ -134,7 +137,7 @@ local function launch_client(args, mode_name)
                     local cursor = vim.api.nvim_win_get_cursor(0)
                     local line = cursor[1] - 1
                     local char = cursor[2]
-                    
+
                     local params = {
                         textDocument = { uri = vim.uri_from_bufnr(bufnr) },
                         position = { line = line, character = char }
@@ -165,18 +168,42 @@ local function launch_client(args, mode_name)
 end
 
 function M.host()
-    launch_client({ "--mode", "host", "--port", "4444" }, "Host")
-end
-
-function M.join_interactive()
-    vim.ui.input({ prompt = 'Host IP (default 127.0.0.1): ' }, function(ip)
-        if ip == "" or ip == nil then ip = "127.0.0.1" end
-        vim.ui.input({ prompt = 'Security Token: ' }, function(token)
-            if token == nil or token == "" then
-                status_msg("Token is required!", true)
+    vim.ui.input({ prompt = 'Relay server address: ' }, function(ip)
+        if ip == "" or ip == nil then
+            status_msg("Relay server address is required!", true)
+            return
+        end
+        vim.ui.input({ prompt = 'Password to use: ' }, function(pw)
+            if pw == "" or pw == nil then
+                status_msg("Password is required!", true)
                 return
             end
-            launch_client({ "--mode", "peer", "--remote-ip", ip, "--token", token }, "Peer")
+
+            launch_client({ "--mode", "host", "--remote-ip", ip, "--key", pw }, "Host")
+        end)
+    end)
+end
+
+function M.join()
+    vim.ui.input({ prompt = 'Relay server address: ' }, function(ip)
+        if ip == "" or ip == nil then
+            status_msg("Relay server address is required!", true)
+            return
+        end
+        vim.ui.input({ prompt = 'Session name: ' }, function(name)
+            if name == "" or name == nil then
+                status_msg("Session name is required!", true)
+                return
+            end
+
+            vim.ui.input({ prompt = "Session password: " }, function(pw)
+                if pw == "" or pw == nil then
+                    status_msg("Session password is required!", true)
+                    return
+                end
+
+                launch_client({ "--mode", "peer", "--remote-ip", ip, "--session-name", name, "--key", pw }, "Host")
+            end)
         end)
     end)
 end
@@ -186,3 +213,4 @@ function M.setup(opts)
 end
 
 return M
+

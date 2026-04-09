@@ -16,7 +16,11 @@ impl Server {
         }
     }
 
-    pub fn register_session(&self, session: Session) {
+    pub fn register_session(&self, mut session: Session) {
+        while self.sessions.contains_key(&session.name) {
+            session.regenerate_name();
+        }
+
         self.sessions.insert(session.name.clone(), session);
     }
 

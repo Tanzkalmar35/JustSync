@@ -1,18 +1,18 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::handler::EditorCommand;
-use crate::logger;
 use crate::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::network::NetworkCommand;
 use crate::state::Workspace;
 use ropey::Rope;
 use tokio::sync::mpsc;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Event {
+    Ignoring,
+
     /// The user typed something in the editor (Stdin)
     LocalChange {
         uri: String,
@@ -99,6 +99,7 @@ impl Core {
             tokio::select! {
                 Some(event) = rx.recv() => {
                     match event {
+                        Event::Ignoring {} => {},
                         Event::LocalChange { uri, changes } => {
                             self.handle_local_change(uri, changes).await;
                         }

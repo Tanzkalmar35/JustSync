@@ -1,5 +1,5 @@
 if vim.g.loaded_justsync_nvim_adapter then
-  return
+    return
 end
 vim.g.loaded_justsync_nvim_adapter = 1
 
@@ -13,9 +13,9 @@ end, { desc = "Start JustSync in Host mode" })
 -- Command: :JustSyncJoin
 -- Starts the interactive mode (asking for ip and token)
 vim.api.nvim_create_user_command("JustSyncJoin", function()
-    adapter.join_interactive()
-end, { 
-    desc = "Join a JustSync session (Interactive)" 
+    adapter.join()
+end, {
+    desc = "Join a JustSync session (Interactive)"
 })
 
 -- Helper for opening the lsp log directly

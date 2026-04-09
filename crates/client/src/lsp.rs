@@ -47,7 +47,7 @@ pub struct VersionedTextDocumentIdentifier {
     pub version: i32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TextDocumentContentChangeEvent {
     pub range: Option<Range>,
     pub text: String,

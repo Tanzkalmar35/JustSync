@@ -3,7 +3,6 @@ use std::process::exit;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-// Module definitions
 pub mod core;
 pub mod crypto;
 pub mod diff;
@@ -21,9 +20,9 @@ use crate::{
 
 struct Context {
     mode: String,
-    remote_ip: Option<String>,
-    port: u16,
-    token: Option<String>,
+    remote_ip: String,
+    session_name: Option<String>,
+    key: String,
 }
 
 #[tokio::main]
@@ -33,40 +32,30 @@ pub async fn main() {
     let ctx = parse_cmd();
     let is_host = ctx.mode == "host";
 
-    // Logging init
-    crate::logger::init(is_host);
+    crate::logger::init();
 
-    // Prepare crypto
-    let (server_cert, server_key, active_token) = if is_host {
-        // Host - generate everything from scratch
-        let (cert, key, token_str) = crypto::generate_cert_and_token();
-
-        // Note: It's eprintln!() so it's automatically picked up by editors (as an lsp error)
-        eprintln!("---------------------------------------------------");
-        eprintln!("🔑 SECRET TOKEN: {}", token_str);
-        eprintln!("---------------------------------------------------");
-
-        (Some(cert), Some(key), token_str)
-    } else {
-        // peer - just take token from args
-        if ctx.token.is_none() {
-            eprintln!("Fehler: Als Peer musst du --token <TOKEN> angeben!");
-            exit(1);
-        }
-        (None, None, ctx.token.unwrap())
-    };
-
-    // --- CHANNEL SETUP ---
-
-    // Core Inbox
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
-    // Network Outbox
     let (net_out_tx, net_out_rx) = mpsc::channel::<NetworkCommand>(100);
-    // Editor Outbox
     let (editor_out_tx, editor_out_rx) = mpsc::channel(100);
 
-    // --- CORE ACTOR ---
     let agent_id = Uuid::new_v4().to_string();
+
+    // Connect to relay and run network actor
+    let conn = match network::connect(ctx.remote_ip.parse().unwrap()).await {
+        Ok(conn) => conn,
+        Err(e) => panic!("{}", e),
+    };
+    let _ = network::run_peer(
+        ctx.key,
+        ctx.session_name,
+        agent_id.clone(),
+        core_tx.clone(),
+        net_out_rx,
+        conn,
+    )
+    .await;
+
+    // Run core actor
     let core = Core::new(agent_id, net_out_tx, editor_out_tx);
 
     // Host: Scan files
@@ -83,33 +72,7 @@ pub async fn main() {
         core.run(core_rx).await;
     });
 
-    // --- NETWORK ACTOR ---
-
-    let net_core_tx = core_tx.clone();
-
-    let net_mode = ctx.mode.clone();
-    let net_ip = ctx.remote_ip.clone();
-    let net_port = ctx.port;
-
-    tokio::spawn(async move {
-        let res = crate::network::run(
-            net_mode,
-            net_ip,
-            net_port,
-            net_core_tx, // Send to Core
-            net_out_rx,  // Receive from Core
-            active_token,
-            server_cert,
-            server_key,
-        )
-        .await;
-
-        if let Err(e) = res {
-            panic!("{}", e);
-        }
-    });
-
-    // --- EDITOR ADAPTER (Main Thread) ---
+    // Run editor adapter on main thread
     crate::handler::run(core_tx, editor_out_rx).await;
 }
 
@@ -127,20 +90,19 @@ fn parse_cmd() -> Context {
             Arg::new("remote-ip")
                 .long("remote-ip")
                 .help("The remote ip address to connect to (required for peer)")
+                .required(true),
+        )
+        .arg(
+            Arg::new("name")
+                .long("session-name")
+                .help("The name of the session to join (retrieve from host)")
                 .required(false),
         )
         .arg(
-            Arg::new("token")
-                .long("token")
+            Arg::new("key")
+                .long("key")
                 .help("The security token (required for peer)")
-                .required(false),
-        )
-        .arg(
-            Arg::new("port")
-                .long("port")
-                .help("The port to listen on or connect to")
-                .default_value("4444")
-                .value_parser(clap::value_parser!(u16)),
+                .required(true),
         )
         .arg(
             Arg::new("stdio")
@@ -151,9 +113,15 @@ fn parse_cmd() -> Context {
         .get_matches();
 
     let mode = matches.get_one::<String>("mode").unwrap().clone();
-    let remote_ip = matches.get_one::<String>("remote-ip").cloned();
-    let token = matches.get_one::<String>("token").cloned();
-    let port = *matches.get_one::<u16>("port").unwrap();
+    let remote_ip = matches
+        .get_one::<String>("remote-ip")
+        .cloned()
+        .expect("Expected remote ip");
+    let session_name = matches.get_one::<String>("name").cloned();
+    let key = matches
+        .get_one::<String>("key")
+        .cloned()
+        .expect("Expected session key");
 
     if mode != "host" && mode != "peer" {
         eprintln!("Invalid mode. Use --mode host or --mode peer.");
@@ -163,7 +131,7 @@ fn parse_cmd() -> Context {
     Context {
         mode,
         remote_ip,
-        port,
-        token,
+        session_name,
+        key,
     }
 }
