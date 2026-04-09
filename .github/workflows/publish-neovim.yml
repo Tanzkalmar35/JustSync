@@ -1,0 +1,30 @@
+name: Publish Neovim Extension
+
+on:
+  push:
+    branches:
+      - master 
+    paths:
+      # ONLY trigger this workflow if files in the neovim extension change
+      - 'extensions/neovim/**'
+      - '.github/workflows/publish-neovim.yml'
+
+jobs:
+  mirror-neovim-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Monorepo
+        uses: actions/checkout@v4
+
+      - name: Push Subdirectory to Standalone Repo
+        # This action syncs the directory exactly as-is to the target repo
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.NVIM_REPO_PAT }}
+        with:
+          source-directory: 'extensions/neovim'
+          destination-github-username: 'Tanzkalmar35'
+          destination-repository-name: 'justsync.nvim'
+          user-email: 'fabianholler2005@gmail.com'
+          target-branch: master
+          commit-message: "task: sync neovim extension from monorepo"
