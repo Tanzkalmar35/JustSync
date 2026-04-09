@@ -1,0 +1,8 @@
+name: Publish Neovim Extension
+on:
+  workflow_dispatch:
+jobs:
+  dummy-job:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Registering workflow in UI"
