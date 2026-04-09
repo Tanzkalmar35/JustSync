@@ -32,7 +32,9 @@ pub async fn main() {
     let ctx = parse_cmd();
     let is_host = ctx.mode == "host";
 
-    crate::logger::init();
+    crate::logger::init(&ctx.mode);
+
+    crate::logger::log(&format!("Starting JustSync in {} mode", ctx.mode));
 
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
     let (net_out_tx, net_out_rx) = mpsc::channel::<NetworkCommand>(100);
@@ -41,7 +43,7 @@ pub async fn main() {
     let agent_id = Uuid::new_v4().to_string();
 
     // Connect to relay and run network actor
-    let conn = match network::connect(ctx.remote_ip.parse().unwrap()).await {
+    let conn = match network::connect(ctx.remote_ip.parse().unwrap(), "").await {
         Ok(conn) => conn,
         Err(e) => panic!("{}", e),
     };

@@ -45,11 +45,11 @@ pub enum NetworkCommand {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 enum ControlMessage {
-    InitSession { key: String },
+    Register { key: String },
     SessionCreated { status: String, name: String },
-    JoinSession { name: String, key: String },
+    Join { name: String, key: String },
     SessionJoined { status: String },
-    InitPeer { agent_id: String },
+    InitPeer { agent_id: String, is_host: bool },
 }
 
 /// Connects to the given relay address and returns the send and recv streams.
@@ -66,13 +66,16 @@ enum ControlMessage {
 /// * If the connection to the relay fails
 pub async fn connect(
     relay_addr: SocketAddr,
+    token: &str,
 ) -> Result<quinn::Connection, Box<dyn std::error::Error>> {
+    logger::log(&format!("Connecting to relay at {}...", relay_addr));
     // Setup connection
     let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
-    let cfg = configure_client("");
+    let cfg = configure_client(token);
     endpoint.set_default_client_config(cfg);
 
     let conn = endpoint.connect(relay_addr, "relay")?.await?;
+    logger::log("Connected to relay.");
     Ok(conn)
 }
 
@@ -123,17 +126,42 @@ pub async fn run_peer(
                 Ok((mut send, mut recv)) => {
                     let init_msg = ControlMessage::InitPeer {
                         agent_id: agent_id.clone(),
+                        is_host,
                     };
-                    send_framed(&mut send, &init_msg).await.expect("Couldn't send verify message");
+                    send_framed(&mut send, &init_msg)
+                        .await
+                        .expect("Couldn't send verify message");
 
                     let mut buf = vec![0u8; 1024];
                     let n = recv.read(&mut buf).await.unwrap().unwrap_or(0);
 
                     let msg: ControlMessage = serde_json::from_slice(&buf[..n])
                         .expect("Unable to deserialize incoming message");
-                    if let ControlMessage::InitPeer { agent_id } = msg {
+
+                    if let ControlMessage::InitPeer {
+                        agent_id: remote_agent_id,
+                        is_host: remote_is_host,
+                    } = msg
+                    {
+                        logger::log(&format!(
+                            ">> [Network] Connected to peer {} (host: {})",
+                            remote_agent_id, remote_is_host
+                        ));
+
                         let mut p = peers_accept.lock().await;
-                        p.insert(agent_id.clone(), send);
+                        p.insert(remote_agent_id.clone(), send);
+
+                        // If we are a peer and we just connected to the host, request sync
+                        if !is_host && remote_is_host {
+                            logger::log(">> [Network] Requesting initial sync from host...");
+                            let sync_req = WireMessage::RequestFullSync;
+                            if let Some(host_send) = p.get_mut(&remote_agent_id) {
+                                send_framed(host_send, &sync_req)
+                                    .await
+                                    .expect("Failed to send sync request");
+                            }
+                        }
+
                         // Run receiving map for each peer in a separate thread
                         tokio::spawn(recv_loop(recv, core_tx_ref.clone(), is_host));
                     } else {
@@ -141,7 +169,8 @@ pub async fn run_peer(
                     }
                 }
                 Err(e) => {
-                    panic!("{}", e);
+                    logger::log(&format!("!! [Network] accept_bi failed: {}", e));
+                    break;
                 }
             }
         }
@@ -184,12 +213,14 @@ async fn init_session(
     recv: &mut quinn::RecvStream,
     session_key: String,
 ) -> anyhow::Result<()> {
-    let msg = ControlMessage::InitSession { key: session_key };
+    logger::log("Registering new session on relay...");
+    let msg = ControlMessage::Register { key: session_key };
 
     let response = init(send, recv, msg).await?;
 
     if let ControlMessage::SessionCreated { status, name } = response {
         if status.eq("ok") {
+            logger::log(&format!("Created session - name: {}", name));
             eprintln!("Created session - name: {}", name);
         } else {
             return Err(anyhow::Error::msg(
@@ -219,7 +250,8 @@ async fn join_session(
     session_name: String,
     session_key: String,
 ) -> anyhow::Result<()> {
-    let msg = ControlMessage::JoinSession {
+    logger::log(&format!("Joining session {}...", session_name));
+    let msg = ControlMessage::Join {
         name: session_name,
         key: session_key,
     };
@@ -232,6 +264,7 @@ async fn join_session(
                 "Unable to init session on relay server!",
             ));
         }
+        logger::log("Successfully joined session.");
     } else {
         return Err(anyhow::Error::msg(
             "Invalid relay server response, check relay server logs for more information!",
@@ -291,12 +324,19 @@ async fn recv_loop(mut recv: quinn::RecvStream, core_tx: mpsc::Sender<Event>, is
                     }
                     WireMessage::RequestFullSync => {
                         if is_host {
+                            logger::log(">> [Network] Received sync request from peer.");
                             Event::PeerRequestedSync
                         } else {
                             Event::Ignoring
                         }
                     }
-                    WireMessage::FullSyncResponse { files } => Event::RemoteFullSync { files },
+                    WireMessage::FullSyncResponse { files } => {
+                        logger::log(&format!(
+                            ">> [Network] Received full sync response with {} files.",
+                            files.len()
+                        ));
+                        Event::RemoteFullSync { files }
+                    }
                 };
 
                 // Local outgoing

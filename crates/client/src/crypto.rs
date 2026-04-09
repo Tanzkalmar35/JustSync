@@ -48,6 +48,11 @@ impl ServerCertVerifier for TokenVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
+        // If no token is provided, skip verification (useful for local testing)
+        if self.expected_hash.is_empty() {
+            return Ok(ServerCertVerified::assertion());
+        }
+
         // Calculate received hash
         let cert_hash = digest(&SHA256, end_entity.as_ref());
 

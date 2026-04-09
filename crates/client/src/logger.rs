@@ -23,8 +23,9 @@ static LOG_FILE: OnceLock<String> = OnceLock::new();
 /// logger::init();
 /// assert!(fs::exists("/tmp/justsync.log"));
 /// ```
-pub fn init() {
-    LOG_FILE.set(String::from("/tmp/justsync.log")).unwrap();
+pub fn init(suffix: &str) {
+    let filename = format!("/tmp/justsync-{}.log", suffix);
+    LOG_FILE.set(filename).unwrap();
 
     let path = LOG_FILE.get().unwrap();
 
