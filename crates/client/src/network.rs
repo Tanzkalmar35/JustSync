@@ -2,7 +2,10 @@ use anyhow::Result;
 use quinn::{ClientConfig, Connection, SendStream, TransportConfig, VarInt};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, mpsc};
+use tokio::{
+    io::join,
+    sync::{Mutex, mpsc},
+};
 
 use crate::{core::Event, logger, lsp::Position};
 
@@ -105,13 +108,7 @@ pub async fn run_peer(
     conn: Connection,
 ) -> anyhow::Result<()> {
     let (mut send, mut recv) = conn.open_bi().await?;
-    let mut is_host = false;
-    if let Some(name) = session_name {
-        join_session(&mut send, &mut recv, name, session_key).await?;
-    } else {
-        is_host = true;
-        init_session(&mut send, &mut recv, session_key).await?;
-    };
+    let is_host = session_name.is_none();
 
     // agent_id -> send to peer stream
     let peers: Arc<Mutex<HashMap<String, SendStream>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -119,23 +116,26 @@ pub async fn run_peer(
 
     // Loop for accepting incoming peer stream requests in the relay's connection
     let peers_accept = Arc::clone(&peers);
+    let conn_accept = conn.clone();
+    let agent_id_accept = agent_id.clone();
     tokio::spawn(async move {
         loop {
-            let new_peer = conn.accept_bi().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            logger::log("Waiting for peer to connect");
+            let new_peer = conn_accept.accept_bi().await;
+            logger::log("Getting new stream req");
             match new_peer {
                 Ok((mut send, mut recv)) => {
                     let init_msg = ControlMessage::InitPeer {
-                        agent_id: agent_id.clone(),
+                        agent_id: agent_id_accept.clone(),
                         is_host,
                     };
                     send_framed(&mut send, &init_msg)
                         .await
                         .expect("Couldn't send verify message");
 
-                    let mut buf = vec![0u8; 1024];
-                    let n = recv.read(&mut buf).await.unwrap().unwrap_or(0);
-
-                    let msg: ControlMessage = serde_json::from_slice(&buf[..n])
+                    let msg: ControlMessage = recv_framed(&mut recv)
+                        .await
                         .expect("Unable to deserialize incoming message");
 
                     if let ControlMessage::InitPeer {
@@ -176,6 +176,12 @@ pub async fn run_peer(
         }
     });
 
+    if let Some(name) = session_name {
+        join_session(&mut send, &mut recv, name, session_key).await?;
+    } else {
+        init_session(&mut send, &mut recv, session_key).await?;
+    }
+
     // Plain outbound traffic
     let peers_out = Arc::clone(&peers);
     tokio::spawn(async move {
@@ -197,7 +203,7 @@ pub async fn run_peer(
     });
 
     // Cleanup
-    let _ = core_tx.send(Event::Shutdown).await;
+    // let _ = core_tx.send(Event::Shutdown).await;
     Ok(())
 }
 
@@ -408,19 +414,24 @@ where
 /// * If reading into the buffer fails
 /// * If the incoming message is too large (>100MB)
 /// * If deserializing fails
-async fn recv_framed(recv: &mut quinn::RecvStream) -> Result<WireMessage> {
+async fn recv_framed<T>(recv: &mut quinn::RecvStream) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
     let mut len_buf = [0u8; 4];
     recv.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
 
     if len > 100 * 1024 * 1024 {
         return Err(anyhow::anyhow!("Message too large (100MB limit)"));
+    } else if len == 0 {
+        return Box::pin(recv_framed(recv)).await;
     }
 
     let mut buf = vec![0u8; len];
     recv.read_exact(&mut buf).await?;
 
-    let msg = serde_json::from_slice(&buf)?;
+    let msg = serde_json::from_slice::<T>(&buf)?;
     Ok(msg)
 }
 
@@ -430,6 +441,7 @@ async fn recv_framed(recv: &mut quinn::RecvStream) -> Result<WireMessage> {
 
 fn make_transport_config() -> TransportConfig {
     let mut transport_config = TransportConfig::default();
+    transport_config.max_concurrent_bidi_streams(VarInt::from_u32(100));
     transport_config.max_concurrent_uni_streams(VarInt::from_u32(100));
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
     transport_config.max_idle_timeout(Some(VarInt::from_u32(30_000).into()));

@@ -76,7 +76,7 @@ async fn process_editor_message(body: &str, tx: &mpsc::Sender<Event>, root_dir: 
 
                             logger::log(&format!(">> [Handler] didOpen URI: '{}'", uri));
 
-                            if uri.is_empty() || uri == "/" {
+                            if uri.is_empty() || uri == "/" || uri.starts_with("oil://") {
                                 return;
                             }
 
@@ -97,7 +97,7 @@ async fn process_editor_message(body: &str, tx: &mpsc::Sender<Event>, root_dir: 
 
                             logger::log(&format!(">> [Handler] didChange URI: '{}'", uri));
 
-                            if uri.is_empty() || uri == "/" {
+                            if uri.is_empty() || uri == "/" || uri.starts_with("oil://") {
                                 return;
                             }
 
@@ -126,6 +126,11 @@ async fn process_editor_message(body: &str, tx: &mpsc::Sender<Event>, root_dir: 
                         {
                             let uri =
                                 crate::fs::to_relative_path(&params.text_document.uri, root_dir);
+
+                            if uri.starts_with("oil://") {
+                                return;
+                            }
+
                             let _ = tx
                                 .send(Event::LocalCursorChange {
                                     uri,

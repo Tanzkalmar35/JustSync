@@ -84,6 +84,7 @@ pub fn scan_project_directory(root: &str) -> Vec<(String, String)> {
                 };
 
                 if file_name.starts_with('.')
+                    || file_name.starts_with("oil://")
                     || file_name == "target"
                     || file_name == "node_modules"
                     || file_name == "dist"

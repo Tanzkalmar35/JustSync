@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use quinn::{Connection, SendStream};
 use rand::RngExt;
 
-use crate::connection::hotwire;
+use crate::{ControlMessage, connection::hotwire};
 
 #[derive(Clone)]
 pub struct Session {
@@ -38,12 +38,12 @@ impl Session {
             tokio::spawn(hotwire(p.clone(), peer.clone()));
         });
 
-        send.write_all(b"{\"status\":\"ok\"}")
+        let msg = ControlMessage::SessionJoined { status: String::from("ok") };
+        send.write_all(&serde_json::to_vec(&msg).unwrap())
             .await
             .expect("Couldn't report status");
-        send.finish().expect("Unable to write msg");
 
-        self.peers.lock().unwrap().push(peer.clone());
+        self.peers.lock().expect("Couldn't lock peers...").push(peer.clone());
         Ok(())
     }
 

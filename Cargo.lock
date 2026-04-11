@@ -1428,9 +1428,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dashmap",
+ "hex",
  "petname",
  "quinn",
  "rand 0.10.0",
+ "rcgen",
+ "ring",
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",

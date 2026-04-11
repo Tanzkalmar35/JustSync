@@ -99,7 +99,7 @@ impl Core {
             tokio::select! {
                 Some(event) = rx.recv() => {
                     match event {
-                        Event::Ignoring {} => {},
+                        Event::Ignoring => {},
                         Event::LocalChange { uri, changes } => {
                             self.handle_local_change(uri, changes).await;
                         }

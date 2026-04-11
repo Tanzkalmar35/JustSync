@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::Path};
 
-use quinn::{ServerConfig, Connection, Endpoint};
+use quinn::{Connection, Endpoint, ServerConfig, VarInt};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
@@ -12,20 +12,20 @@ pub mod server;
 pub mod session;
 
 #[derive(Deserialize, Serialize, Debug)]
-#[serde(tag = "action")]
-enum ControlMessage {
+pub enum ControlMessage {
     Register { key: String },
-    Join { session_id: String, key: String },
+    SessionCreated { status: String, name: String },
+    Join { name: String, key: String },
+    SessionJoined { status: String },
 }
 
-#[derive(Serialize)]
-struct SessionCreatedMessage {
-    status: String,
-    name: String,
-}
+const DEV_MODE: bool = true;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install default crypto provider for rustls
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let endpoint = setup().await?;
     let server = Server::setup();
 
@@ -50,17 +50,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn setup() -> Result<Endpoint, Box<dyn std::error::Error>> {
-    // Load Let's Encrypt Certs
-    // Make sure these paths match what Certbot outputs on the server
-    let cert_path = Path::new("/etc/letsencrypt/live/relay.yourdomain.com/fullchain.pem");
-    let key_path = Path::new("/etc/letsencrypt/live/relay.yourdomain.com/privkey.pem");
-    let server_config = load_certs(cert_path, key_path)?;
+    let server_config = if DEV_MODE {
+        println!("DEV_MODE: Generating self-signed certificate for localhost...");
+        generate_self_signed_config()?
+    } else {
+        // Load Let's Encrypt Certs
+        // Make sure these paths match what Certbot outputs on the server
+        let cert_path = Path::new("/etc/letsencrypt/live/relay.yourdomain.com/fullchain.pem");
+        let key_path = Path::new("/etc/letsencrypt/live/relay.yourdomain.com/privkey.pem");
+        load_certs(cert_path, key_path)?
+    };
 
     // Bind the endpoint
     let listen_addr: SocketAddr = "0.0.0.0:5000".parse()?;
     let endpoint = Endpoint::server(server_config, listen_addr)?;
-    println!("Production Relay running on {}", listen_addr);
+    println!("Relay running on {}", listen_addr);
     Ok(endpoint)
+}
+
+fn generate_self_signed_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
+    let cert_der = cert.cert.der().clone();
+    let priv_key_bytes = cert.signing_key.serialize_der();
+    let priv_key = rustls_pki_types::PrivatePkcs8KeyDer::from(priv_key_bytes);
+
+    let cert_chain = vec![cert_der];
+    let key = rustls_pki_types::PrivateKeyDer::Pkcs8(priv_key);
+
+    let mut crypto = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain.clone(), key)?;
+    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+
+    let mut server_config = ServerConfig::with_crypto(std::sync::Arc::new(
+        quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,
+    ));
+
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config.max_concurrent_bidi_streams(VarInt::from_u32(100));
+    transport_config.max_concurrent_uni_streams(VarInt::from_u32(100));
+    transport_config.max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into()?));
+    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
+
+    server_config.transport_config(std::sync::Arc::new(transport_config));
+
+    // Print the token (hash of the certificate) so the client can use it for verification
+    let hash = ring::digest::digest(&ring::digest::SHA256, cert_chain[0].as_ref());
+    let token = hex::encode(hash.as_ref());
+    println!("--- DEV_MODE TOKEN: {} ---", token);
+    println!("Use this token in your client configuration to verify the self-signed certificate.");
+
+    Ok(server_config)
 }
 
 /// [TODO:description]
@@ -110,7 +150,14 @@ pub fn load_certs(
         .ok_or("No private key found in the PEM file")?;
 
     // 4. Build the Quinn ServerConfig
-    let mut server_config = ServerConfig::with_single_cert(certs, key)?;
+    let mut crypto = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
+    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+
+    let mut server_config = ServerConfig::with_crypto(std::sync::Arc::new(
+        quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,
+    ));
 
     // OPTIONAL BUT HIGHLY RECOMMENDED:
     // Configure keep-alives so NAT routers don't drop idle connections
@@ -146,40 +193,46 @@ async fn handle_connection(
 
             server.register_session(session.clone());
 
-            let ans = SessionCreatedMessage {
+            let ans = ControlMessage::SessionCreated {
                 status: String::from("ok"),
                 name: session_name.clone(),
             };
             send.write_all(&serde_json::to_vec(&ans)?).await?;
             send.finish()?;
-
-            // Host now waits for peers. If this loop ends, the Host disconnected.
-            let disconnect_reason = connection.closed().await;
-            println!(
-                "Host left ({:?}). Removing session: {}",
-                disconnect_reason, session_name
-            );
-
-            server.deregister_session(session_name)?;
         }
-        ControlMessage::Join { session_id, key } => {
+        ControlMessage::Join {
+            name: session_id,
+            key,
+        } => {
             println!("Peer trying to join session: {}", session_id);
 
             // Look up the Host's connection in the map
             if let Some(mut session) = server.find_session(&session_id) {
-                if let Err(e) = session.join(connection, key, &mut send).await
+                if let Err(e) = session.join(connection.clone(), key.clone(), &mut send).await
                     && e.eq("Error joining session - invalid key")
                 {
-                    send.write_all(b"{\"status\":\"error\", \"reason\":\"Invalid key\"}")
-                        .await?;
+                    // send.write_all(b"{\"status\":\"error\", \"reason\":\"Invalid key\"}")
+                    //     .await?;
+                    println!("Invalid key: {}", key.clone());
                 }
             } else {
-                send.write_all(b"{\"status\":\"error\", \"reason\":\"session not found\"}")
-                    .await?;
+                // send.write_all(b"{\"status\":\"error\", \"reason\":\"session not found\"}")
+                //     .await?;
+                println!("Session to join not found: {}", session_id.clone());
             }
-            send.finish()?;
+            tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
+            send.finish().expect("Couldn't finish send stream");
+        }
+        _ => {
+            eprintln!("Invalid controlmessage received")
         }
     }
 
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        if connection.close_reason().is_some() {
+            break;
+        }
+    }
     Ok(())
 }
