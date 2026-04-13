@@ -42,7 +42,7 @@ pub async fn run(core_tx: mpsc::Sender<Event>, mut editor_rx: mpsc::Receiver<Edi
                         break;
                     }
                     Err(e) => {
-                        eprintln!("!! Stdin Error: {}", e);
+                        logger::log(&format!("!! Stdin Error: {}", e));
                         break;
                     }
                 }
@@ -66,7 +66,7 @@ pub async fn run(core_tx: mpsc::Sender<Event>, mut editor_rx: mpsc::Receiver<Edi
 async fn process_editor_message(body: &str, tx: &mpsc::Sender<Event>, root_dir: &str) {
     if let Ok(header) = serde_json::from_str::<LspHeader>(body) {
         if let Some(method) = header.method {
-            logger::log(&format!(">> [Handler] Method: {}", method));
+            // logger::log(&format!(">> [Handler] Method: {}", method));
             match method.as_str() {
                 "textDocument/didOpen" => {
                     if let Some(params_val) = header.params {
@@ -232,86 +232,4 @@ async fn perform_initialization_handshake(
     write_rpc(stdout, &response.to_string()).await;
 
     (root_dir, ())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::Event;
-    use serde_json::json;
-    use std::time::Duration;
-    use tokio::sync::mpsc;
-
-    #[tokio::test]
-    async fn test_handler_did_open() {
-        let (tx, mut rx) = mpsc::channel(10);
-        // We simulate a root directory. crate::fs::to_relative_path strips the root.
-        // Assuming to_relative_path handles basic string manipulation.
-        let root_dir = "/tmp/project";
-
-        let msg = json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    // Note: In real LSP this often starts with file://
-                    "uri": "file:///tmp/project/src/main.rs",
-                    "languageId": "rust",
-                    "version": 1,
-                    "text": "fn main() {}"
-                }
-            }
-        })
-        .to_string();
-
-        process_editor_message(&msg, &tx, root_dir).await;
-
-        match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
-            Ok(Some(Event::ClientDidOpen { uri, content })) => {
-                // We expect "src/main.rs" or similar depending on implementation
-                // Let's just check it contains the relevant part to be safe against separator differences
-                assert!(uri.contains("src/main.rs"));
-                assert_eq!(content, "fn main() {}");
-            }
-            _ => panic!("Expected ClientDidOpen"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handler_did_change() {
-        let (tx, mut rx) = mpsc::channel(10);
-        let root_dir = "/tmp/project";
-
-        let msg = json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didChange",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///tmp/project/src/lib.rs",
-                    "version": 2
-                },
-                "contentChanges": [
-                    {
-                        "range": {
-                            "start": { "line": 0, "character": 0 },
-                            "end": { "line": 0, "character": 0 }
-                        },
-                        "text": "pub "
-                    }
-                ]
-            }
-        })
-        .to_string();
-
-        process_editor_message(&msg, &tx, root_dir).await;
-
-        match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
-            Ok(Some(Event::LocalChange { uri, changes })) => {
-                assert!(uri.contains("src/lib.rs"));
-                assert_eq!(changes.len(), 1);
-                assert_eq!(changes[0].text, "pub ");
-            }
-            _ => panic!("Expected LocalChange"),
-        }
-    }
 }

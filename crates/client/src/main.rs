@@ -71,7 +71,7 @@ pub async fn main() {
 
     // Spawn Core
     tokio::spawn(async move {
-        core.run(core_rx).await;
+        core.run(core_rx, is_host).await;
     });
 
     // Run editor adapter on main thread

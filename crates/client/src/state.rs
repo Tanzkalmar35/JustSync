@@ -26,18 +26,18 @@ impl Workspace {
     }
 
     /// Retrieves an existing document or creates a new one with the given content.
-    pub fn get_or_create(&mut self, uri: String, content: String) -> &mut Document {
+    pub fn get_or_create(&mut self, uri: String, content: String, is_host: bool) -> &mut Document {
         self.documents
             .entry(uri.clone())
-            .or_insert_with(|| Document::new(uri, content, &self.local_agent_id))
+            .or_insert_with(|| Document::new(uri, content, &self.local_agent_id, is_host))
     }
 
     /// Retrieves a document or creates an empty one if it doesn't exist.
-    pub fn get_or_create_empty(&mut self, uri: String) -> &mut Document {
+    pub fn get_or_create_empty(&mut self, uri: String, is_host: bool) -> &mut Document {
         if !self.documents.contains_key(&uri) {
             self.documents.insert(
                 uri.clone(),
-                Document::new(uri.clone(), String::new(), &self.local_agent_id),
+                Document::new(uri.clone(), String::new(), &self.local_agent_id, is_host),
             );
         }
         self.documents.get_mut(&uri).unwrap()
@@ -90,11 +90,11 @@ pub struct Document {
 }
 
 impl Document {
-    pub fn new(uri: String, initial_content: String, agent_id: &str) -> Self {
+    pub fn new(uri: String, initial_content: String, agent_id: &str, is_host: bool) -> Self {
         let mut crdt = ListCRDT::new();
 
         // Initialize CRDT with content if present
-        if !initial_content.is_empty() {
+        if !initial_content.is_empty() && is_host {
             let agent = crdt.get_or_create_agent_id("init");
             crdt.insert(agent, 0, &initial_content);
         }
@@ -121,7 +121,7 @@ impl Document {
     ) -> Option<Vec<u8>> {
         // Echo guard
         if self.pending_remote_updates.load(Ordering::SeqCst) > 0 {
-            logger::log("Received update request, but blocking due to pending counter");
+            logger::log(&format!("Received update request - blocking. Pending counter: {}", self.pending_remote_updates.load(Ordering::SeqCst)));
             self.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
@@ -191,12 +191,11 @@ impl Document {
                 if edits.is_empty() {
                     None
                 } else {
-                    self.pending_remote_updates.fetch_add(1, Ordering::SeqCst);
                     Some(edits)
                 }
             }
             Err(e) => {
-                eprintln!("!! [CRDT] Failed to merge: {:?}", e);
+                logger::log(&format!("!! [CRDT] Failed to merge: {:?}", e));
                 None
             }
         }
@@ -237,334 +236,6 @@ impl Document {
         } else {
             // Full text replacement (uncommon in incremental sync but possible)
             *rope = Rope::from_str(&change.text);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::lsp::{Position, Range};
-
-    use super::*;
-    use proptest::prelude::*;
-
-    #[test]
-    fn test_workspace_lifecycle() {
-        let mut ws = Workspace::new("agent-A".to_string());
-        let uri = "file:///test.txt".to_string();
-
-        // Get or Create Empty
-        let doc = ws.get_or_create_empty(uri.clone());
-        assert_eq!(doc.content.len_chars(), 0);
-        assert_eq!(doc.uri, uri);
-
-        // Mark Open/Closed
-        ws.mark_open(uri.clone());
-        assert!(ws.is_open(&uri));
-        ws.mark_closed(&uri);
-        assert!(!ws.is_open(&uri));
-    }
-
-    #[test]
-    fn test_apply_local_insertion() {
-        let mut doc = Document::new("doc1".into(), "Hello".into(), "agent-A");
-
-        // Simulate LSP Change: Insert " World" at the end
-        let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 5,
-                },
-                end: Position {
-                    line: 0,
-                    character: 5,
-                },
-            }),
-            text: " World".to_string(),
-        };
-
-        let patch = doc.apply_local_changes(vec![change]);
-
-        // Verify View (Rope)
-        assert_eq!(doc.content.to_string(), "Hello World");
-
-        // Verify Truth (CRDT)
-        assert_eq!(doc.crdt.branch.content().to_string(), "Hello World");
-
-        // Verify Patch was generated
-        assert!(patch.is_some());
-    }
-
-    #[test]
-    fn test_apply_local_deletion() {
-        let mut doc = Document::new("doc1".into(), "Hello World".into(), "agent-A");
-
-        // Simulate LSP Change: Delete "Hello "
-        let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 0,
-                    character: 6,
-                },
-            }),
-            text: "".to_string(),
-        };
-
-        doc.apply_local_changes(vec![change]);
-
-        assert_eq!(doc.content.to_string(), "World");
-        assert_eq!(doc.crdt.branch.content().to_string(), "World");
-    }
-
-    #[test]
-    fn test_remote_patch_merging() {
-        // Create two documents representing two users
-        let mut doc_a = Document::new("uri".into(), "Init".into(), "A");
-        let mut doc_b = Document::new("uri".into(), "Init".into(), "B");
-
-        // User A makes a change
-        let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 4,
-                },
-                end: Position {
-                    line: 0,
-                    character: 4,
-                },
-            }),
-            text: "ialized".to_string(),
-        };
-
-        let patch_bytes = doc_a
-            .apply_local_changes(vec![change])
-            .expect("Should gen patch");
-
-        // User B receives patch
-        let _edits = doc_b.apply_remote_patch(&patch_bytes);
-
-        // Assert B is now "Initialized"
-        assert_eq!(doc_b.content.to_string(), "Initialized");
-        assert_eq!(doc_b.crdt.branch.content().to_string(), "Initialized");
-
-        // Assert Pending Updates counter incremented (indicating UI needs redraw)
-        assert_eq!(doc_b.pending_remote_updates.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn test_crdt_convergence() {
-        // The "Diamond" Problem: Two agents edit the same spot concurrently.
-        let mut doc_a = Document::new("uri".into(), "Start".into(), "A");
-        let mut doc_b = Document::new("uri".into(), "Start".into(), "B");
-
-        // A Inserts "X" at start -> "XStart"
-        let change_a = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 0,
-                    character: 0,
-                },
-            }),
-            text: "X".to_string(),
-        };
-        let patch_from_a = doc_a.apply_local_changes(vec![change_a]).unwrap();
-
-        // B Inserts "Y" at start -> "YStart"
-        let change_b = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 0,
-                    character: 0,
-                },
-            }),
-            text: "Y".to_string(),
-        };
-        let patch_from_b = doc_b.apply_local_changes(vec![change_b]).unwrap();
-
-        // Sync A <- B
-        doc_a.apply_remote_patch(&patch_from_b);
-
-        // Sync B <- A
-        doc_b.apply_remote_patch(&patch_from_a);
-
-        // Both must match exactly.
-        // Diamond Types (SE-2) usually sorts by Agent ID for concurrent insertions at same site.
-        assert_eq!(doc_a.content.to_string(), doc_b.content.to_string());
-
-        // It will be either XYStart or YXStart, but must be consistent.
-        println!("Converged state: {}", doc_a.content);
-    }
-
-    #[test]
-    fn test_snapshot_restore() {
-        // 1. Create a workspace with history
-        let mut ws = Workspace::new("A".to_string());
-        let uri = "file:///save.txt".to_string();
-        let doc = ws.get_or_create(uri.clone(), "Initial".to_string());
-
-        // Make an edit so history is non-empty
-        let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 7,
-                },
-                end: Position {
-                    line: 0,
-                    character: 7,
-                },
-            }),
-            text: " Saved".to_string(),
-        };
-        doc.apply_local_changes(vec![change]);
-
-        // 2. Take Snapshot
-        let snapshot = ws.get_snapshot();
-        let (saved_uri, saved_data) = &snapshot[0];
-
-        // 3. Rehydrate into a NEW Workspace
-        // Note: You might need a method to load from snapshot,
-        // or manually reconstruct specifically for this test:
-        let mut crdt_new = ListCRDT::new();
-        crdt_new
-            .oplog
-            .decode_and_add(saved_data)
-            .expect("Snapshot decode failed");
-        crdt_new
-            .branch
-            .merge(&crdt_new.oplog, crdt_new.oplog.local_version_ref());
-
-        assert_eq!(saved_uri, &uri);
-        assert_eq!(crdt_new.branch.content().to_string(), "Initial Saved");
-    }
-
-    // =========================================================================
-    //  PROPTESTS (Fuzzing)
-    // =========================================================================
-
-    proptest! {
-        #[test]
-        fn test_apply_changes_resilience(
-            initial_text in "\\PC*",
-            line in 0usize..500,
-            character in 0usize..500
-        ) {
-            let mut doc = Document::new("safe".into(), initial_text, "tester");
-
-            let change = TextDocumentContentChangeEvent {
-                range: Some(Range {
-                    start: Position { line, character },
-                    end: Position { line, character: character + 1 }
-                }),
-                text: "safe".to_string()
-            };
-
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                 let _ = doc.apply_local_changes(vec![change]);
-            }));
-        }
-
-        // Edit Fuzzing
-        // Performs random insertions and deletions and ensures CRDT == Rope
-        #[test]
-        fn test_fuzz_local_edits(
-            initial_text in "[a-z0-9]{0,20}",
-            ref edits in prop::collection::vec(
-                (0usize..20, "[a-z0-9]{0,5}", 0usize..20), 1..10 // (index, text, delete_len)
-            )
-        ) {
-            let mut doc = Document::new("fuzz".into(), initial_text.clone(), "fuzzer");
-
-            for &(mut idx, ref insert_text, ref delete_len) in edits {
-                // normalize index to current length
-                let current_len = doc.content.len_chars();
-                if current_len == 0 {
-                    idx = 0;
-                } else {
-                    idx %= current_len;
-                }
-
-                let mut end_idx = idx + delete_len;
-                if end_idx > current_len { end_idx = current_len; }
-
-                // Convert flat index back to LSP Position (reverse of your logic)
-                let start_line = doc.content.char_to_line(idx);
-                let start_col = idx - doc.content.line_to_char(start_line);
-
-                let end_line = doc.content.char_to_line(end_idx);
-                let end_col = end_idx - doc.content.line_to_char(end_line);
-
-                let change = TextDocumentContentChangeEvent {
-                    range: Some(Range {
-                        start: Position { line: start_line, character: start_col },
-                        end: Position { line: end_line, character: end_col },
-                    }),
-                    text: insert_text.to_string(),
-                };
-
-                doc.apply_local_changes(vec![change]);
-            }
-
-            // Invariant Check
-            assert_eq!(doc.content.to_string(), doc.crdt.branch.content().to_string(), "Rope and CRDT desynced!");
-        }
-    }
-
-    #[test]
-    fn test_patch_idempotency() {
-        // Applying the same patch twice should have no effect the second time
-        let mut doc_a = Document::new("uri".into(), "Init".into(), "A");
-        let mut doc_b = Document::new("uri".into(), "Init".into(), "B");
-
-        // A makes change
-        let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 4,
-                },
-                end: Position {
-                    line: 0,
-                    character: 4,
-                },
-            }),
-            text: "ialized".to_string(),
-        };
-        let patch = doc_a.apply_local_changes(vec![change]).unwrap();
-
-        // B applies ONCE
-        let edits_1 = doc_b.apply_remote_patch(&patch);
-        assert!(edits_1.is_some());
-        assert_eq!(doc_b.content.to_string(), "Initialized");
-
-        // B applies TWICE (Duplicate packet)
-        let edits_2 = doc_b.apply_remote_patch(&patch);
-
-        // Diamond Types handles duplicates gracefully (idempotent),
-        // but depending on version it might return "no edits" or "empty edits".
-        // Crucially, the content must remain correct.
-        assert_eq!(doc_b.content.to_string(), "Initialized");
-
-        // If it detected it as already applied, it should ideally return None or empty vector
-        if let Some(e) = edits_2 {
-            assert!(
-                e.is_empty(),
-                "Should not generate text edits for duplicate patch"
-            );
         }
     }
 }

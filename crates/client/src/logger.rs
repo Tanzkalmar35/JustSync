@@ -2,6 +2,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::sync::OnceLock;
 
+use chrono::Utc;
+
 static LOG_FILE: OnceLock<String> = OnceLock::new();
 
 /// Initializes the binary's logger to /tmp/justsync.log.
@@ -58,10 +60,12 @@ pub fn log(msg: &str) {
     let path = LOG_FILE.get().unwrap_or(&unknown_path);
 
     // Get PID
-    let pid = std::process::id();
+    // let pid = std::process::id();
 
     // Print to stderr (captured by VS Code output panel usually)
-    eprintln!("[{}] {}", pid, msg);
+    // eprintln!("[{}] {}", pid, msg);
+    
+    let time = Utc::now().to_string();
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -70,5 +74,5 @@ pub fn log(msg: &str) {
         .unwrap();
 
     // Write with PID prefix
-    let _ = writeln!(file, "[{}] {}", pid, msg);
+    let _ = writeln!(file, "[{}] {}", time, msg);
 }

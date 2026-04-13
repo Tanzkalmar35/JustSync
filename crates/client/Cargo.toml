@@ -22,6 +22,7 @@ ring = "0.17"
 hex = "0.4"
 proptest = "1.9.0"
 dissimilar = "1.0.10"
+chrono = "0.4.44"
 
 [dev-dependencies]
 tempfile = "3"
