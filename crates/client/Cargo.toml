@@ -23,6 +23,7 @@ hex = "0.4"
 proptest = "1.9.0"
 dissimilar = "1.0.10"
 chrono = "0.4.44"
+mockall = "0.14.0"
 
 [dev-dependencies]
 tempfile = "3"

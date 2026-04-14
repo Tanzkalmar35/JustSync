@@ -3,20 +3,11 @@ use std::process::exit;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-pub mod core;
-pub mod crypto;
-pub mod diff;
-pub mod fs;
-pub mod handler;
-pub mod logger;
-pub mod lsp;
-pub mod network;
-pub mod state;
+use crate::{adapters::{fs, handler, network::{self, NetworkCommand}}, internal::core::{Core, Event}};
 
-use crate::{
-    core::{Core, Event},
-    network::NetworkCommand,
-};
+pub mod logger;
+pub mod internal;
+pub mod adapters;
 
 struct Context {
     mode: String,
@@ -63,7 +54,7 @@ pub async fn main() {
     // Host: Scan files
     if is_host {
         logger::log(">> [Host] Scanning workspace files...");
-        let files = crate::fs::scan_project_directory(".");
+        let files = fs::scan_project_directory(".");
         for (uri, content) in files {
             let _ = core_tx.send(Event::LoadFromDisk { uri, content }).await;
         }
@@ -75,7 +66,7 @@ pub async fn main() {
     });
 
     // Run editor adapter on main thread
-    crate::handler::run(core_tx, editor_out_rx).await;
+    handler::run(core_tx, editor_out_rx).await;
 }
 
 fn parse_cmd() -> Context {
