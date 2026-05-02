@@ -1,5 +1,5 @@
-use crate::adapters::fs::FsOps;
 use crate::internal::core::Event;
+use crate::internal::fs::to_relative_path;
 use crate::internal::lsp::{
     self, CursorPositionParams, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader,
     Position, TextEdit,
@@ -16,7 +16,7 @@ pub enum EditorCommand {
     RemoteCursor { uri: String, position: Position },
 }
 
-pub trait EditorAdapter: Send + Sync {
+pub trait EditorAdapter {
     /// Initialize the connection and return the root directory.
     async fn init(&mut self) -> anyhow::Result<String>;
 
@@ -129,9 +129,8 @@ impl EditorAdapter for StdioAdapter {
 }
 
 /// Orchestrator: The main loop, generic over Ports.
-pub async fn run<A: EditorAdapter, F: FsOps>(
-    mut adapter: A,
-    fs: F,
+pub async fn run(
+    mut adapter: impl EditorAdapter,
     core_tx: mpsc::Sender<Event>,
     mut editor_rx: mpsc::Receiver<EditorCommand>,
 ) {
@@ -143,7 +142,7 @@ pub async fn run<A: EditorAdapter, F: FsOps>(
             read_res = adapter.read_msg() => {
                 match read_res {
                     Ok(Some(header)) => {
-                        process_editor_message(header, &core_tx, &fs, &root_dir).await;
+                        process_editor_message(header, &core_tx, &root_dir).await;
                     }
                     Ok(None) => {
                         let _ = core_tx.send(Event::Shutdown).await;
@@ -166,14 +165,7 @@ pub async fn run<A: EditorAdapter, F: FsOps>(
     }
 }
 
-/// Translation: Business Logic for LSP -> Event mapping.
-/// Now generic over FsOps for 100% mockable path testing!
-async fn process_editor_message<F: FsOps>(
-    header: LspHeader,
-    tx: &mpsc::Sender<Event>,
-    fs: &F,
-    root_dir: &str,
-) {
+async fn process_editor_message(header: LspHeader, tx: &mpsc::Sender<Event>, root_dir: &str) {
     let method = match header.method {
         Some(m) => m,
         None => return,
@@ -183,7 +175,7 @@ async fn process_editor_message<F: FsOps>(
         "textDocument/didOpen" => {
             if let Some(params_val) = header.params {
                 if let Ok(params) = serde_json::from_value::<DidOpenParams>(params_val) {
-                    let uri = fs.to_relative_path(&params.text_document.uri, root_dir);
+                    let uri = to_relative_path(&params.text_document.uri, root_dir);
                     if is_ignored(&uri) {
                         return;
                     }
@@ -200,7 +192,7 @@ async fn process_editor_message<F: FsOps>(
         "textDocument/didChange" => {
             if let Some(params_val) = header.params {
                 if let Ok(params) = serde_json::from_value::<DidChangeParams>(params_val) {
-                    let uri = fs.to_relative_path(&params.text_document.uri, root_dir);
+                    let uri = to_relative_path(&params.text_document.uri, root_dir);
                     if is_ignored(&uri) {
                         return;
                     }
@@ -217,7 +209,7 @@ async fn process_editor_message<F: FsOps>(
         "textDocument/didClose" => {
             if let Some(params_val) = header.params {
                 if let Ok(params) = serde_json::from_value::<DidCloseParams>(params_val) {
-                    let uri = fs.to_relative_path(&params.text_document.uri, root_dir);
+                    let uri = to_relative_path(&params.text_document.uri, root_dir);
                     let _ = tx.send(Event::ClientDidClose { uri }).await;
                 }
             }
@@ -225,7 +217,7 @@ async fn process_editor_message<F: FsOps>(
         "$/justsync/cursor" => {
             if let Some(params_val) = header.params {
                 if let Ok(params) = serde_json::from_value::<CursorPositionParams>(params_val) {
-                    let uri = fs.to_relative_path(&params.text_document.uri, root_dir);
+                    let uri = to_relative_path(&params.text_document.uri, root_dir);
                     if is_ignored(&uri) {
                         return;
                     }

@@ -3,11 +3,22 @@ use std::process::exit;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::{adapters::{fs, handler, network::{self, NetworkCommand}}, internal::core::{Core, Event}};
+use crate::{
+    adapters::{
+        fs::FileSystem,
+        handler::{self, StdioAdapter},
+        network::QuicNetworkAdapter,
+    },
+    internal::{
+        core::{Core, Event},
+        fs::FsOps,
+        network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
+    },
+};
 
-pub mod logger;
-pub mod internal;
 pub mod adapters;
+pub mod internal;
+pub mod logger;
 
 struct Context {
     mode: String,
@@ -23,9 +34,8 @@ pub async fn main() {
     let ctx = parse_cmd();
     let is_host = ctx.mode == "host";
 
-    crate::logger::init(&ctx.mode);
-
-    crate::logger::log(&format!("Starting JustSync in {} mode", ctx.mode));
+    logger::init(&ctx.mode);
+    logger::log(&format!("Starting JustSync in {} mode", ctx.mode));
 
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
     let (net_out_tx, net_out_rx) = mpsc::channel::<NetworkCommand>(100);
@@ -34,39 +44,45 @@ pub async fn main() {
     let agent_id = Uuid::new_v4().to_string();
 
     // Connect to relay and run network actor
-    let conn = match network::connect(ctx.remote_ip.parse().unwrap(), "").await {
-        Ok(conn) => conn,
-        Err(e) => panic!("{}", e),
+    let role = if is_host {
+        SessionRole::Host {}
+    } else {
+        SessionRole::Peer {
+            session_name: ctx.session_name.unwrap(),
+        }
     };
-    let _ = network::run_peer(
-        ctx.key,
-        ctx.session_name,
-        agent_id.clone(),
+    let session = SessionCfg {
+        agent_id: agent_id.clone(),
+        key: ctx.key,
+        relay_addr: ctx.remote_ip.parse().unwrap(),
+        role,
+    };
+    tokio::spawn(QuicNetworkAdapter::connect_and_run(
+        session,
         core_tx.clone(),
         net_out_rx,
-        conn,
-    )
-    .await;
+    ));
 
     // Run core actor
     let core = Core::new(agent_id, net_out_tx, editor_out_tx);
 
+    let fs = FileSystem {};
+    let editor = StdioAdapter::new();
+
     // Host: Scan files
     if is_host {
         logger::log(">> [Host] Scanning workspace files...");
-        let files = fs::scan_project_directory(".");
+        let files = fs.scan_project_directory(".");
         for (uri, content) in files {
             let _ = core_tx.send(Event::LoadFromDisk { uri, content }).await;
         }
     }
 
     // Spawn Core
-    tokio::spawn(async move {
-        core.run(core_rx, is_host).await;
-    });
+    tokio::spawn(core.run(core_rx, is_host, fs));
 
     // Run editor adapter on main thread
-    handler::run(core_tx, editor_out_rx).await;
+    handler::run(editor, core_tx, editor_out_rx).await;
 }
 
 fn parse_cmd() -> Context {

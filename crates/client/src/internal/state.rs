@@ -6,8 +6,7 @@ use std::{
 };
 
 use crate::{
-    logger,
-    lsp::{TextDocumentContentChangeEvent, TextEdit},
+    internal::{diff, lsp::{Range, TextDocumentContentChangeEvent, TextEdit}}, logger
 };
 
 pub struct Workspace {
@@ -186,7 +185,7 @@ impl Document {
                 let new_rope = Rope::from_str(&new_text);
                 self.content = new_rope.clone();
 
-                let edits = crate::diff::calculate_edits(&old_rope, &new_rope);
+                let edits = diff::calculate_edits(&old_rope, &new_rope);
                 logger::log(&format!("Calculated edits: {:?}", edits));
                 if edits.is_empty() {
                     None
@@ -206,7 +205,7 @@ impl Document {
     // =========================================================================
 
     /// Converts LSP Position (Line, Char) to Byte Offset
-    fn get_offsets_from_rope(rope: &Rope, range: &crate::lsp::Range) -> (usize, usize) {
+    fn get_offsets_from_rope(rope: &Rope, range: &Range) -> (usize, usize) {
         let len_lines = rope.len_lines();
 
         // Safety: Clamp line index

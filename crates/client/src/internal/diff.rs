@@ -1,6 +1,7 @@
-use crate::lsp::{Position, Range, TextEdit};
 use dissimilar::Chunk;
 use ropey::Rope;
+
+use crate::internal::lsp::{Position, Range, TextEdit};
 
 pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     // Fast pointer comparison or deep comparison if pointers differ.

@@ -2,13 +2,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::handler::EditorCommand;
-use crate::logger;
-use crate::lsp::{Position, TextDocumentContentChangeEvent};
-use crate::network::NetworkCommand;
-use crate::state::Workspace;
 use ropey::Rope;
 use tokio::sync::mpsc;
+
+use crate::adapters::handler::EditorCommand;
+use crate::internal::diff;
+use crate::internal::fs::FsOps;
+use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
+use crate::internal::network::NetworkCommand;
+use crate::internal::state::Workspace;
+use crate::logger;
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -93,7 +96,7 @@ impl Core {
     }
 
     /// The Main Loop: Process one event at a time.
-    pub async fn run(mut self, mut rx: mpsc::Receiver<Event>, is_host: bool) {
+    pub async fn run(mut self, mut rx: mpsc::Receiver<Event>, is_host: bool, fs: impl FsOps) {
         let mut flush_timer = tokio::time::interval(Duration::from_millis(5));
 
         loop {
@@ -136,7 +139,7 @@ impl Core {
                                 .await;
                         }
                         Event::PeerRequestedSync => {
-                            crate::logger::log(">> [Core] Peer requested sync. Bundling state...");
+                            logger::log(">> [Core] Peer requested sync. Bundling state...");
                             let snapshot = self
                                 .workspace
                                 .get_snapshot()
@@ -150,7 +153,7 @@ impl Core {
                                 .await;
                         }
                         Event::RemoteFullSync { files } => {
-                            crate::logger::log(
+                            logger::log(
                                 ">> [Core] Received Full Sync. Hydrating & Writing to Disk...",
                             );
 
@@ -173,13 +176,13 @@ impl Core {
                             }
 
                             // Write to Disk
-                            if let Err(e) = crate::fs::write_project_files(files_to_write) {
-                                crate::logger::log(&format!(
+                            if let Err(e) = fs.write_project_files(files_to_write) {
+                                logger::log(&format!(
                                     "!! [Disk] Failed to write synced files: {}",
                                     e
                                 ));
                             } else {
-                                crate::logger::log(">> [Disk] Full sync written to storage.");
+                                logger::log(">> [Disk] Full sync written to storage.");
                             }
                         }
                         Event::Shutdown => break,
@@ -236,7 +239,7 @@ impl Core {
                 .last_flushed_ropes
                 .entry(uri.clone())
                 .or_insert_with(|| Rope::from_str(""));
-            let edits = crate::diff::calculate_edits(old_rope, &doc.content);
+            let edits = diff::calculate_edits(old_rope, &doc.content);
 
             if !edits.is_empty() {
                 *old_rope = doc.content.clone();
