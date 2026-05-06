@@ -4,14 +4,11 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
-    adapters::{
-        fs::FileSystem,
-        handler::{self, StdioAdapter},
-        network::QuicNetworkAdapter,
-    },
+    adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
     internal::{
         core::{Core, Event},
         fs::FsOps,
+        handler::EditorAdapter,
         network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
     },
 };
@@ -63,13 +60,8 @@ pub async fn main() {
         net_out_rx,
     ));
 
-    // Run core actor
-    let core = Core::new(agent_id, net_out_tx, editor_out_tx);
-
-    let fs = FileSystem {};
-    let editor = StdioAdapter::new();
-
     // Host: Scan files
+    let fs = FileSystem {};
     if is_host {
         logger::log(">> [Host] Scanning workspace files...");
         let files = fs.scan_project_directory(".");
@@ -79,10 +71,12 @@ pub async fn main() {
     }
 
     // Spawn Core
+    let core = Core::new(agent_id, net_out_tx, editor_out_tx);
     tokio::spawn(core.run(core_rx, is_host, fs));
 
     // Run editor adapter on main thread
-    handler::run(editor, core_tx, editor_out_rx).await;
+    let mut adapter = StdioAdapter::new(core_tx);
+    adapter.run(editor_out_rx).await;
 }
 
 fn parse_cmd() -> Context {

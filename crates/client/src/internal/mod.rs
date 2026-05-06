@@ -5,3 +5,4 @@ pub(crate) mod lsp;
 pub(crate) mod state;
 pub(crate) mod network;
 pub(crate) mod fs;
+pub(crate) mod handler;

@@ -77,7 +77,7 @@ pub trait NetworkAdapter: Send {
 }
 
 pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
-    return match cmd {
+    match cmd {
         WireMessage::Patch { uri, data } => {
             logger::log(&format!(">> [Network] Received patch for {}", uri));
             Event::RemotePatch { uri, patch: data }
@@ -107,15 +107,15 @@ pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
             ));
             Event::RemoteFullSync { files }
         }
-    };
+    }
 }
 
 pub fn into_external(cmd: NetworkCommand) -> WireMessage {
-    return match cmd {
+    match cmd {
         NetworkCommand::BroadcastCursor { uri, position } => WireMessage::Cursor { uri, position },
         NetworkCommand::BroadcastPatch { uri, patch } => WireMessage::Patch { uri, data: patch },
         NetworkCommand::SendFullSyncResponse { files } => WireMessage::FullSyncResponse { files },
-    };
+    }
 }
 
 pub fn make_transport_config() -> TransportConfig {

@@ -5,9 +5,9 @@ use std::time::Duration;
 use ropey::Rope;
 use tokio::sync::mpsc;
 
-use crate::adapters::handler::EditorCommand;
 use crate::internal::diff;
 use crate::internal::fs::FsOps;
+use crate::internal::handler::EditorCommand;
 use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::internal::network::NetworkCommand;
 use crate::internal::state::Workspace;

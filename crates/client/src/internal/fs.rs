@@ -41,30 +41,30 @@ pub fn to_relative_path(uri: &str, root: &str) -> String {
     path_norm
 }
 
-pub fn to_absolute_uri(rel_path: &str, root: &str) -> String {
-    // Already a URI
-    if rel_path.starts_with("file://") {
-        return rel_path.replace('\\', "/");
-    }
-
-    // Windows Absolute Path (C:\...)
-    if rel_path.len() > 1 && rel_path.chars().nth(1) == Some(':') {
-        // FIX: Windows URIs need 3 slashes: file:///C:/...
-        return format!("file:///{}", rel_path.replace('\\', "/"));
-    }
-
-    // Unix Absolute Path (/usr/...)
-    if rel_path.starts_with('/') || rel_path.starts_with('\\') {
-        return format!("file://{}", rel_path.replace('\\', "/"));
-    }
-
-    // Relative Path -> Join with Root
-    let clean_root = root.trim_start_matches("file://");
-    let root_norm = clean_root.replace('\\', "/");
-    let rel_norm = rel_path.replace('\\', "/");
-
-    let path = Path::new(&root_norm).join(&rel_norm);
-    let full_path = path.to_string_lossy().replace('\\', "/");
-
-    format!("file://{}", full_path)
-}
+// pub fn to_absolute_uri(rel_path: &str, root: &str) -> String {
+//     // Already a URI
+//     if rel_path.starts_with("file://") {
+//         return rel_path.replace('\\', "/");
+//     }
+//
+//     // Windows Absolute Path (C:\...)
+//     if rel_path.len() > 1 && rel_path.chars().nth(1) == Some(':') {
+//         // FIX: Windows URIs need 3 slashes: file:///C:/...
+//         return format!("file:///{}", rel_path.replace('\\', "/"));
+//     }
+//
+//     // Unix Absolute Path (/usr/...)
+//     if rel_path.starts_with('/') || rel_path.starts_with('\\') {
+//         return format!("file://{}", rel_path.replace('\\', "/"));
+//     }
+//
+//     // Relative Path -> Join with Root
+//     let clean_root = root.trim_start_matches("file://");
+//     let root_norm = clean_root.replace('\\', "/");
+//     let rel_norm = rel_path.replace('\\', "/");
+//
+//     let path = Path::new(&root_norm).join(&rel_norm);
+//     let full_path = path.to_string_lossy().replace('\\', "/");
+//
+//     format!("file://{}", full_path)
+// }

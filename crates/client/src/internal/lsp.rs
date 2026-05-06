@@ -85,15 +85,15 @@ pub struct InitializeParams {
     pub root_uri: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct InitializeResult {
-    pub capabilities: ServerCapabilities,
-}
+// #[derive(Debug, Serialize)]
+// pub struct InitializeResult {
+//     pub capabilities: ServerCapabilities,
+// }
 
-#[derive(Debug, Serialize)]
-pub struct ServerCapabilities {
-    pub text_doc_sync: i32, // 1 = full, 2 = incremental
-}
+// #[derive(Debug, Serialize)]
+// pub struct ServerCapabilities {
+//     pub text_doc_sync: i32, // 1 = full, 2 = incremental
+// }
 
 pub async fn read_message<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,

@@ -137,7 +137,7 @@ impl QuicNetworkAdapter {
 
             // Run receiving map for each peer in a separate thread
             tokio::spawn(async move {
-                self_recv.recv_loop(recv)
+                self_recv.recv_loop(recv).await;
             });
         } else {
             panic!("Invalid setup msg received, expected Init, got {:?}", msg);
@@ -300,7 +300,8 @@ impl NetworkAdapter for QuicNetworkAdapter {
             core_recv: Mutex::new(net_rx),
         };
 
-        let conn = match adapter.connect(session.relay_addr, &session.key).await {
+        // Pass empty token for now -> FIXME
+        let conn = match adapter.connect(session.relay_addr, "").await { 
             Ok(conn) => conn,
             Err(e) => panic!("{}", e),
         };

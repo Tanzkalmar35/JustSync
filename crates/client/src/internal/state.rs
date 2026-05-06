@@ -6,7 +6,11 @@ use std::{
 };
 
 use crate::{
-    internal::{diff, lsp::{Range, TextDocumentContentChangeEvent, TextEdit}}, logger
+    internal::{
+        diff,
+        lsp::{Range, TextDocumentContentChangeEvent, TextEdit},
+    },
+    logger,
 };
 
 pub struct Workspace {
@@ -28,18 +32,12 @@ impl Workspace {
     pub fn get_or_create(&mut self, uri: String, content: String, is_host: bool) -> &mut Document {
         self.documents
             .entry(uri.clone())
-            .or_insert_with(|| Document::new(uri, content, &self.local_agent_id, is_host))
+            .or_insert_with(|| Document::new(content, &self.local_agent_id, is_host))
     }
 
     /// Retrieves a document or creates an empty one if it doesn't exist.
     pub fn get_or_create_empty(&mut self, uri: String, is_host: bool) -> &mut Document {
-        if !self.documents.contains_key(&uri) {
-            self.documents.insert(
-                uri.clone(),
-                Document::new(uri.clone(), String::new(), &self.local_agent_id, is_host),
-            );
-        }
-        self.documents.get_mut(&uri).unwrap()
+        self.get_or_create(uri, String::new(), is_host)
     }
 
     /// Serializes the entire state of all documents
@@ -72,8 +70,6 @@ impl Workspace {
 /// A single file in the workspace.
 /// Encapsulates the synchronization logic ("The Brain of the File").
 pub struct Document {
-    pub uri: String,
-
     /// The "View" - What the user sees in the editor.
     /// Optimized for random access and slicing.
     pub content: Rope,
@@ -89,7 +85,7 @@ pub struct Document {
 }
 
 impl Document {
-    pub fn new(uri: String, initial_content: String, agent_id: &str, is_host: bool) -> Self {
+    pub fn new(initial_content: String, agent_id: &str, is_host: bool) -> Self {
         let mut crdt = ListCRDT::new();
 
         // Initialize CRDT with content if present
@@ -99,17 +95,12 @@ impl Document {
         }
 
         Self {
-            uri,
             content: Rope::from_str(&initial_content),
             crdt,
             agent_id: agent_id.to_string(),
             pending_remote_updates: AtomicUsize::new(0),
         }
     }
-
-    // =========================================================================
-    //  INBOUND: From Local Editor (Stdin)
-    // =========================================================================
 
     /// Processes changes from the editor.
     /// Returns: `Some(Vec<u8>)` (the patch bytes) if the network needs to be notified.
@@ -120,7 +111,10 @@ impl Document {
     ) -> Option<Vec<u8>> {
         // Echo guard
         if self.pending_remote_updates.load(Ordering::SeqCst) > 0 {
-            logger::log(&format!("Received update request - blocking. Pending counter: {}", self.pending_remote_updates.load(Ordering::SeqCst)));
+            logger::log(&format!(
+                "Received update request - blocking. Pending counter: {}",
+                self.pending_remote_updates.load(Ordering::SeqCst)
+            ));
             self.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
@@ -159,10 +153,6 @@ impl Document {
         }
     }
 
-    // =========================================================================
-    //  INBOUND: From Network (QUIC)
-    // =========================================================================
-
     /// Processes a patch from a peer.
     /// Returns: `Some(Vec<TextEdit>)` if the editor needs to be updated.
     pub fn apply_remote_patch(&mut self, patch: &[u8]) -> Option<Vec<TextEdit>> {
@@ -187,11 +177,7 @@ impl Document {
 
                 let edits = diff::calculate_edits(&old_rope, &new_rope);
                 logger::log(&format!("Calculated edits: {:?}", edits));
-                if edits.is_empty() {
-                    None
-                } else {
-                    Some(edits)
-                }
+                if edits.is_empty() { None } else { Some(edits) }
             }
             Err(e) => {
                 logger::log(&format!("!! [CRDT] Failed to merge: {:?}", e));
@@ -235,6 +221,184 @@ impl Document {
         } else {
             // Full text replacement (uncommon in incremental sync but possible)
             *rope = Rope::from_str(&change.text);
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    mod workspace {
+        use super::*;
+
+        mod get_or_create {
+            use super::*;
+
+            #[test]
+            fn new_uri_inserts_new_doc() {
+                let mut workspace = Workspace::new(String::from("agent_id"));
+
+                workspace.get_or_create(
+                    String::from("test_uri"),
+                    String::from("Test Document"),
+                    true,
+                );
+
+                assert_eq!(workspace.documents.len(), 1);
+                assert!(workspace.documents.get_mut("test_uri").is_some());
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().content,
+                    "Test Document"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().agent_id,
+                    "agent_id"
+                );
+            }
+
+            #[test]
+            fn existing_uri_doesnt_override_content() {
+                let mut workspace = Workspace::new(String::from("agent_id"));
+
+                workspace.get_or_create(
+                    String::from("test_uri"),
+                    String::from("First inserted text"),
+                    true,
+                );
+                workspace.get_or_create(
+                    String::from("test_uri"),
+                    String::from("Second inserted text"),
+                    true,
+                );
+
+                assert_eq!(workspace.documents.len(), 1);
+                assert!(workspace.documents.get_mut("test_uri").is_some());
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().content,
+                    "First inserted text"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().agent_id,
+                    "agent_id"
+                );
+            }
+
+            #[test]
+            fn multiple_uris_insert() {
+                let mut workspace = Workspace::new(String::from("agent_id"));
+
+                workspace.get_or_create(
+                    String::from("test_uri"),
+                    String::from("First inserted text"),
+                    true,
+                );
+                workspace.get_or_create(
+                    String::from("test_uri_2"),
+                    String::from("Second inserted text"),
+                    true,
+                );
+
+                assert_eq!(workspace.documents.len(), 2);
+                assert!(workspace.documents.get_mut("test_uri").is_some());
+                assert!(workspace.documents.get_mut("test_uri_2").is_some());
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().content,
+                    "First inserted text"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().agent_id,
+                    "agent_id"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri_2").unwrap().content,
+                    "Second inserted text"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri_2").unwrap().agent_id,
+                    "agent_id"
+                );
+            }
+        }
+
+        mod get_or_create_empty {
+            use super::*;
+
+            #[test]
+            fn new_uri_inserts_empty_doc() {
+                let mut workspace = Workspace::new(String::from("agent_id"));
+
+                workspace.get_or_create_empty(String::from("test_uri"), true);
+
+                assert_eq!(workspace.documents.len(), 1);
+                assert!(workspace.documents.get_mut("test_uri").is_some());
+                assert_eq!(workspace.documents.get_mut("test_uri").unwrap().content, "");
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().agent_id,
+                    "agent_id"
+                );
+            }
+
+            #[test]
+            fn existing_uri_doesnt_override_content() {
+                let mut workspace = Workspace::new(String::from("agent_id"));
+
+                workspace.get_or_create(
+                    String::from("test_uri"),
+                    String::from("First inserted text"),
+                    true,
+                );
+                workspace.get_or_create_empty(String::from("test_uri"), true);
+
+                assert_eq!(workspace.documents.len(), 1);
+                assert!(workspace.documents.get_mut("test_uri").is_some());
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().content,
+                    "First inserted text"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().agent_id,
+                    "agent_id"
+                );
+            }
+
+            #[test]
+            fn multiple_uris_insert() {
+                let mut workspace = Workspace::new(String::from("agent_id"));
+
+                workspace.get_or_create_empty(
+                    String::from("test_uri"),
+                    true,
+                );
+                workspace.get_or_create_empty(
+                    String::from("test_uri_2"),
+                    true,
+                );
+
+                assert_eq!(workspace.documents.len(), 2);
+                assert!(workspace.documents.get_mut("test_uri").is_some());
+                assert!(workspace.documents.get_mut("test_uri_2").is_some());
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().content,
+                    ""
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri").unwrap().agent_id,
+                    "agent_id"
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri_2").unwrap().content,
+                    ""
+                );
+                assert_eq!(
+                    workspace.documents.get_mut("test_uri_2").unwrap().agent_id,
+                    "agent_id"
+                );
+            }
+        }
+
+        mod get_snapshot {
+
         }
     }
 }

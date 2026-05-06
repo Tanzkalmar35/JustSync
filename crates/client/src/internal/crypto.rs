@@ -1,28 +1,27 @@
-use rcgen::generate_simple_self_signed;
 use ring::digest::{SHA256, digest};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, Error, SignatureScheme};
 use std::sync::Arc;
 
-pub fn generate_cert_and_token() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>, String) {
-    // Creating the certificate
-    let cert = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-
-    // Calculate tokens as SHA256 hash of certificate
-    let cert_der = cert.cert.der().clone();
-
-    // Extract private key
-    let priv_key_bytes = cert.signing_key.serialize_der();
-    let priv_key = PrivatePkcs8KeyDer::from(priv_key_bytes);
-
-    // Calculate tokens
-    let hash = digest(&SHA256, cert_der.as_ref());
-    let token = hex::encode(hash.as_ref());
-
-    let cert_chain = vec![cert_der];
-    (cert_chain, PrivateKeyDer::Pkcs8(priv_key), token)
-}
+// pub fn generate_cert_and_token() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>, String) {
+//     // Creating the certificate
+//     let cert = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+//
+//     // Calculate tokens as SHA256 hash of certificate
+//     let cert_der = cert.cert.der().clone();
+//
+//     // Extract private key
+//     let priv_key_bytes = cert.signing_key.serialize_der();
+//     let priv_key = PrivatePkcs8KeyDer::from(priv_key_bytes);
+//
+//     // Calculate tokens
+//     let hash = digest(&SHA256, cert_der.as_ref());
+//     let token = hex::encode(hash.as_ref());
+//
+//     let cert_chain = vec![cert_der];
+//     (cert_chain, PrivateKeyDer::Pkcs8(priv_key), token)
+// }
 
 /// Own special verifier for the peer
 #[derive(Debug)]

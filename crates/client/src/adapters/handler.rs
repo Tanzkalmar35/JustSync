@@ -1,43 +1,28 @@
 use crate::internal::core::Event;
-use crate::internal::fs::to_relative_path;
-use crate::internal::lsp::{
-    self, CursorPositionParams, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader,
-    Position, TextEdit,
+use crate::internal::handler::{
+    EditorAdapter, EditorCommand, handle_change_cmd, handle_close_cmd, handle_cursor_cmd,
+    handle_open_cmd,
 };
+use crate::internal::lsp::{self, LspHeader};
 use crate::logger;
 use serde_json::json;
 use std::path::Path;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone)]
-pub enum EditorCommand {
-    ApplyEdits { uri: String, edits: Vec<TextEdit> },
-    RemoteCursor { uri: String, position: Position },
-}
-
-pub trait EditorAdapter {
-    /// Initialize the connection and return the root directory.
-    async fn init(&mut self) -> anyhow::Result<String>;
-
-    /// Read a message from the editor.
-    async fn read_msg(&mut self) -> anyhow::Result<Option<LspHeader>>;
-
-    /// Send a command to the editor.
-    async fn send_cmd(&mut self, cmd: EditorCommand) -> anyhow::Result<()>;
-}
-
 pub struct StdioAdapter {
     reader: BufReader<tokio::io::Stdin>,
     stdout: tokio::io::Stdout,
+    core_tx: mpsc::Sender<Event>,
     root_dir: String,
 }
 
 impl StdioAdapter {
-    pub fn new() -> Self {
+    pub fn new(core_tx: mpsc::Sender<Event>) -> Self {
         Self {
             reader: BufReader::new(tokio::io::stdin()),
             stdout: tokio::io::stdout(),
+            core_tx,
             root_dir: String::new(),
         }
     }
@@ -49,10 +34,8 @@ impl StdioAdapter {
         self.stdout.flush().await?;
         Ok(())
     }
-}
 
-impl EditorAdapter for StdioAdapter {
-    async fn init(&mut self) -> anyhow::Result<String> {
+    async fn init(&mut self) -> anyhow::Result<()> {
         let body = lsp::read_message(&mut self.reader)
             .await?
             .ok_or_else(|| anyhow::anyhow!("EOF during init"))?;
@@ -79,8 +62,7 @@ impl EditorAdapter for StdioAdapter {
             }
         });
         self.write_rpc(&response.to_string()).await?;
-
-        Ok(self.root_dir.clone())
+        Ok(())
     }
 
     async fn read_msg(&mut self) -> anyhow::Result<Option<LspHeader>> {
@@ -126,115 +108,58 @@ impl EditorAdapter for StdioAdapter {
         }
         Ok(())
     }
-}
 
-/// Orchestrator: The main loop, generic over Ports.
-pub async fn run(
-    mut adapter: impl EditorAdapter,
-    core_tx: mpsc::Sender<Event>,
-    mut editor_rx: mpsc::Receiver<EditorCommand>,
-) {
-    let root_dir = adapter.init().await.expect("Failed to init editor");
+    async fn process_editor_message(&self, header: LspHeader) {
+        let method = match header.method {
+            Some(ref m) => m,
+            None => return,
+        };
 
-    loop {
-        tokio::select! {
-            // INBOUND: Editor -> Core
-            read_res = adapter.read_msg() => {
-                match read_res {
-                    Ok(Some(header)) => {
-                        process_editor_message(header, &core_tx, &root_dir).await;
-                    }
-                    Ok(None) => {
-                        let _ = core_tx.send(Event::Shutdown).await;
-                        break;
-                    }
-                    Err(e) => {
-                        logger::log(&format!("!! Adapter Error: {}", e));
-                        break;
-                    }
-                }
+        match method.as_str() {
+            "textDocument/didOpen" => handle_open_cmd(header, &self.core_tx, &self.root_dir).await,
+            "textDocument/didChange" => {
+                handle_change_cmd(header, &self.core_tx, &self.root_dir).await
             }
-
-            // OUTBOUND: Core -> Editor
-            Some(cmd) = editor_rx.recv() => {
-                if let Err(e) = adapter.send_cmd(cmd).await {
-                    logger::log(&format!("!! Failed to send to editor: {}", e));
-                }
+            "textDocument/didClose" => {
+                handle_close_cmd(header, &self.core_tx, &self.root_dir).await
+            }
+            "$/justsync/cursor" => handle_cursor_cmd(header, &self.core_tx, &self.root_dir).await,
+            _ => {
+                eprintln!("Editor handler received a command that's not implemented!");
             }
         }
     }
 }
 
-async fn process_editor_message(header: LspHeader, tx: &mpsc::Sender<Event>, root_dir: &str) {
-    let method = match header.method {
-        Some(m) => m,
-        None => return,
-    };
-
-    match method.as_str() {
-        "textDocument/didOpen" => {
-            if let Some(params_val) = header.params {
-                if let Ok(params) = serde_json::from_value::<DidOpenParams>(params_val) {
-                    let uri = to_relative_path(&params.text_document.uri, root_dir);
-                    if is_ignored(&uri) {
-                        return;
+impl EditorAdapter for StdioAdapter {
+    async fn run(&mut self, mut editor_rx: mpsc::Receiver<EditorCommand>) {
+        self.init().await.expect("Editor adapter init failed!");
+        loop {
+            tokio::select! {
+                // INBOUND: Editor -> Handler -> Core
+                read_res = self.read_msg() => {
+                    match read_res {
+                        Ok(Some(header)) => {
+                            self.process_editor_message(header).await;
+                        }
+                        Ok(None) => {
+                            let _ = self.core_tx.send(Event::Shutdown).await;
+                            break;
+                        }
+                        Err(e) => {
+                            logger::log(&format!("!! Adapter Error: {}", e));
+                            break;
+                        }
                     }
-
-                    let _ = tx
-                        .send(Event::ClientDidOpen {
-                            uri,
-                            content: params.text_document.text,
-                        })
-                        .await;
                 }
-            }
-        }
-        "textDocument/didChange" => {
-            if let Some(params_val) = header.params {
-                if let Ok(params) = serde_json::from_value::<DidChangeParams>(params_val) {
-                    let uri = to_relative_path(&params.text_document.uri, root_dir);
-                    if is_ignored(&uri) {
-                        return;
+
+                // OUTBOUND: Core -> Handler -> Editor
+                Some(cmd) = editor_rx.recv() => {
+                    if let Err(e) = self.send_cmd(cmd).await {
+                        logger::log(&format!("!! Failed to send to editor: {}", e));
                     }
-
-                    let _ = tx
-                        .send(Event::LocalChange {
-                            uri,
-                            changes: params.content_changes,
-                        })
-                        .await;
                 }
             }
         }
-        "textDocument/didClose" => {
-            if let Some(params_val) = header.params {
-                if let Ok(params) = serde_json::from_value::<DidCloseParams>(params_val) {
-                    let uri = to_relative_path(&params.text_document.uri, root_dir);
-                    let _ = tx.send(Event::ClientDidClose { uri }).await;
-                }
-            }
-        }
-        "$/justsync/cursor" => {
-            if let Some(params_val) = header.params {
-                if let Ok(params) = serde_json::from_value::<CursorPositionParams>(params_val) {
-                    let uri = to_relative_path(&params.text_document.uri, root_dir);
-                    if is_ignored(&uri) {
-                        return;
-                    }
-
-                    let _ = tx
-                        .send(Event::LocalCursorChange {
-                            uri,
-                            position: params.position,
-                        })
-                        .await;
-                }
-            }
-        }
-        _ => {}
     }
-}
-
-fn is_ignored(uri: &str) -> bool {
-    uri.is_empty() || uri == "/" || uri.starts_with("oil://")
 }
