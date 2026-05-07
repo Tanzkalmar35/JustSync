@@ -128,3 +128,78 @@ fn offset_to_position(rope: &Rope, char_idx: usize) -> Position {
         character: col,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equal_content_gives_no_edits_end() {
+        let old_content = Rope::from_str("Some content");
+        let new_content = Rope::from_str("Some content");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn add_content_only_insertions_beginning() {
+        let old_content = Rope::from_str("Some content");
+        let new_content = Rope::from_str("Additionally Some content");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "Additionally ")
+    }
+    
+    #[test]
+    fn add_content_only_insertions_middle() {
+        let old_content = Rope::from_str("Some content");
+        let new_content = Rope::from_str("Some additional content");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "additional ")
+    }
+
+    #[test]
+    fn added_content_only_insertions_end() {
+        let old_content = Rope::from_str("Some content");
+        let new_content = Rope::from_str("Some content addition");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, " addition")
+    }
+
+    #[test]
+    fn deleted_content_only_deletions_beginning() {
+        let old_content = Rope::from_str("Additionally Some content");
+        let new_content = Rope::from_str("Some content");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "")
+    }
+
+    #[test]
+    fn deleted_content_only_deletions_end() {
+        let old_content = Rope::from_str("Some content addition");
+        let new_content = Rope::from_str("Some content");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "")
+    }
+}
