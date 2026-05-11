@@ -144,6 +144,18 @@ mod tests {
     }
 
     #[test]
+    fn add_content_only_insertions_empty() {
+        let old_content = Rope::from_str("");
+        let new_content = Rope::from_str("Content ");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "Content ")
+    }
+
+    #[test]
     fn add_content_only_insertions_beginning() {
         let old_content = Rope::from_str("Some content");
         let new_content = Rope::from_str("Additionally Some content");
@@ -201,5 +213,93 @@ mod tests {
         assert!(!diff.is_empty());
         assert_eq!(diff.len(), 1);
         assert_eq!(diff.first().unwrap().new_text, "")
+    }
+
+    #[test]
+    fn deleted_content_only_deletions_middle() {
+        let old_content = Rope::from_str("Some middle content");
+        let new_content = Rope::from_str("Some content");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "")
+    }
+
+    #[test]
+    fn deleted_content_only_deletions_empty() {
+        let old_content = Rope::from_str("Content");
+        let new_content = Rope::from_str("");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "")
+    }
+
+    #[test]
+    fn full_replacement() {
+        let old_content = Rope::from_str("Old text");
+        let new_content = Rope::from_str("Completely new");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 2);
+        assert_eq!(diff.first().unwrap().new_text, "");
+        assert_eq!(diff.get(1).unwrap().new_text, "Completely new");
+    }
+
+    #[test]
+    fn parital_replacement() {
+        let old_content = Rope::from_str("Hello World!");
+        let new_content = Rope::from_str("Hello Earthlings!");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 2);
+        assert_eq!(diff.first().unwrap().new_text, "");
+        assert_eq!(diff.get(1).unwrap().new_text, "Earthlings");
+    }
+
+    #[test]
+    fn same_length_replacement() {
+        let old_content = Rope::from_str("asd");
+        let new_content = Rope::from_str("xyz");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 2);
+        assert_eq!(diff.first().unwrap().new_text, "");
+        assert_eq!(diff.get(1).unwrap().new_text, "xyz");
+    }
+
+    #[test]
+    fn shared_prefix_and_suffix() {
+        let old_content = Rope::from_str("abXcd");
+        let new_content = Rope::from_str("abYcd");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 2);
+        assert_eq!(diff.first().unwrap().new_text, "");
+        assert_eq!(diff.get(1).unwrap().new_text, "Y");
+    }
+
+    #[test]
+    fn suffix_does_not_overlap_prefix() {
+        let old_content = Rope::from_str("abXc");
+        let new_content = Rope::from_str("abc");
+
+        let diff = calculate_edits(&old_content, &new_content);
+
+        assert!(!diff.is_empty());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.first().unwrap().new_text, "");
     }
 }
