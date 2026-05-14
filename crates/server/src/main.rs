@@ -1,15 +1,13 @@
+use std::sync::Arc;
 use std::{net::SocketAddr, path::Path};
 
 use quinn::{Connection, Endpoint, ServerConfig, VarInt};
 use serde::{Deserialize, Serialize};
+use server::server::Server;
+use server::session::Session;
 use std::fs::File;
 use std::io::BufReader;
-
-use crate::{server::Server, session::Session};
-
-pub mod connection;
-pub mod server;
-pub mod session;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Deserialize, Serialize, Debug)]
 pub enum ControlMessage {
@@ -111,21 +109,13 @@ fn generate_self_signed_config() -> Result<ServerConfig, Box<dyn std::error::Err
 /// * `key_path` - [TODO:description]
 ///
 /// # Errors
-///
-/// [TODO:describe error types and what triggers them]
-///
-/// # Examples
-///
-/// ```
-/// [TODO:write some example code]
-/// ```
 pub fn load_certs(
     cert_path: &Path,
     key_path: &Path,
 ) -> Result<ServerConfig, Box<dyn std::error::Error>> {
     println!("Loading TLS certificates...");
 
-    // 1. Open the certificate and key files
+    // Open the certificate and key files
     let cert_file = File::open(cert_path)
         .map_err(|e| format!("Failed to open cert file at {:?}: {}", cert_path, e))?;
     let key_file = File::open(key_path)
@@ -134,7 +124,7 @@ pub fn load_certs(
     let mut cert_reader = BufReader::new(cert_file);
     let mut key_reader = BufReader::new(key_file);
 
-    // 2. Parse the certificate chain
+    // Parse the certificate chain
     // rustls_pemfile::certs returns an iterator of Results, so we collect them into a Vec
     let certs = rustls_pemfile::certs(&mut cert_reader)
         .collect::<Result<Vec<_>, _>>()
@@ -144,12 +134,12 @@ pub fn load_certs(
         return Err("No certificates found in the PEM file".into());
     }
 
-    // 3. Parse the private key
+    // Parse the private key
     // rustls_pemfile handles RSA, PKCS8, and SEC1 keys automatically
     let key = rustls_pemfile::private_key(&mut key_reader)?
         .ok_or("No private key found in the PEM file")?;
 
-    // 4. Build the Quinn ServerConfig
+    // Build the Quinn ServerConfig
     let mut crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
@@ -159,7 +149,6 @@ pub fn load_certs(
         quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,
     ));
 
-    // OPTIONAL BUT HIGHLY RECOMMENDED:
     // Configure keep-alives so NAT routers don't drop idle connections
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into()?));
@@ -186,7 +175,7 @@ async fn handle_connection(
 
     match msg {
         ControlMessage::Register { key } => {
-            let session = Session::new(connection.clone(), key);
+            let session = Session::new(Arc::new(connection.clone()), key);
             let session_name = session.name.clone();
 
             println!("Host registering session: {}", session_name);
@@ -208,7 +197,9 @@ async fn handle_connection(
 
             // Look up the Host's connection in the map
             if let Some(mut session) = server.find_session(&session_id) {
-                if let Err(e) = session.join(connection.clone(), key.clone(), &mut send).await
+                if let Err(e) = session
+                    .join(Arc::new(connection.clone()), key.clone(), &mut send)
+                    .await
                     && e.eq("Error joining session - invalid key")
                 {
                     // send.write_all(b"{\"status\":\"error\", \"reason\":\"Invalid key\"}")
@@ -221,7 +212,7 @@ async fn handle_connection(
                 println!("Session to join not found: {}", session_id.clone());
             }
             tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
-            send.finish().expect("Couldn't finish send stream");
+            send.shutdown().await.map_err(|e| e.to_string())?;
         }
         _ => {
             eprintln!("Invalid controlmessage received")

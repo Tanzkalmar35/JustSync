@@ -3,6 +3,7 @@ use ropey::Rope;
 
 use crate::internal::lsp::{Position, Range, TextEdit};
 
+#[must_use]
 pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     // Fast pointer comparison or deep comparison if pointers differ.
     if old == new {

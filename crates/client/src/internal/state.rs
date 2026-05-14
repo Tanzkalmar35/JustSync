@@ -29,18 +29,19 @@ impl Workspace {
     }
 
     /// Retrieves an existing document or creates a new one with the given content.
-    pub fn get_or_create(&mut self, uri: String, content: String, is_host: bool) -> &mut Document {
+    pub fn get_or_create(&mut self, uri: &str, content: &str, is_host: bool) -> &mut Document {
         self.documents
-            .entry(uri.clone())
+            .entry(uri.to_string())
             .or_insert_with(|| Document::new(content, &self.local_agent_id, is_host))
     }
 
     /// Retrieves a document or creates an empty one if it doesn't exist.
-    pub fn get_or_create_empty(&mut self, uri: String, is_host: bool) -> &mut Document {
-        self.get_or_create(uri, String::new(), is_host)
+    pub fn get_or_create_empty(&mut self, uri: &str, is_host: bool) -> &mut Document {
+        self.get_or_create(uri, "", is_host)
     }
 
     /// Serializes the entire state of all documents
+    #[must_use]
     pub fn get_snapshot(&self) -> Vec<(String, Vec<u8>)> {
         let mut results = Vec::new();
         for (uri, doc) in &self.documents {
@@ -62,6 +63,7 @@ impl Workspace {
         self.open_files.remove(uri);
     }
 
+    #[must_use]
     pub fn is_open(&self, uri: &str) -> bool {
         self.open_files.contains(uri)
     }
@@ -69,6 +71,7 @@ impl Workspace {
 
 /// A single file in the workspace.
 /// Encapsulates the synchronization logic ("The Brain of the File").
+#[must_use]
 pub struct Document {
     /// The "View" - What the user sees in the editor.
     /// Optimized for random access and slicing.
@@ -85,17 +88,17 @@ pub struct Document {
 }
 
 impl Document {
-    pub fn new(initial_content: String, agent_id: &str, is_host: bool) -> Self {
+    pub fn new(initial_content: &str, agent_id: &str, is_host: bool) -> Self {
         let mut crdt = ListCRDT::new();
 
         // Initialize CRDT with content if present
         if !initial_content.is_empty() && is_host {
             let agent = crdt.get_or_create_agent_id("init");
-            crdt.insert(agent, 0, &initial_content);
+            crdt.insert(agent, 0, initial_content);
         }
 
         Self {
-            content: Rope::from_str(&initial_content),
+            content: Rope::from_str(initial_content),
             crdt,
             agent_id: agent_id.to_string(),
             pending_remote_updates: AtomicUsize::new(0),
@@ -176,11 +179,11 @@ impl Document {
                 self.content = new_rope.clone();
 
                 let edits = diff::calculate_edits(&old_rope, &new_rope);
-                logger::log(&format!("Calculated edits: {:?}", edits));
+                logger::log(&format!("Calculated edits: {edits:?}"));
                 if edits.is_empty() { None } else { Some(edits) }
             }
             Err(e) => {
-                logger::log(&format!("!! [CRDT] Failed to merge: {:?}", e));
+                logger::log(&format!("!! [CRDT] Failed to merge: {e:?}"));
                 None
             }
         }
@@ -232,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_echo_suppression() {
-        let mut doc = Document::new("initial".to_string(), "agent-1", true);
+        let mut doc = Document::new("initial", "agent-1", true);
         
         // Simulate a remote update pending
         doc.pending_remote_updates.store(1, Ordering::SeqCst);
@@ -257,10 +260,10 @@ mod tests {
     #[test]
     fn test_crdt_convergence_with_hydration() {
         // 1. Host starts with "Hello"
-        let mut host = Document::new("Hello".to_string(), "host-agent", true);
+        let mut host = Document::new("Hello", "host-agent", true);
         
         // 2. Peer starts empty
-        let mut peer = Document::new("".to_string(), "peer-agent", false);
+        let mut peer = Document::new("", "peer-agent", false);
 
         // 3. Initial Hydration: Host sends its current state to Peer
         let hydration_patch = host.crdt.oplog.encode(diamond_types::list::encoding::EncodeOptions::default());
@@ -298,8 +301,8 @@ mod tests {
     #[test]
     fn test_workspace_snapshot() {
         let mut ws = Workspace::new("host".to_string());
-        ws.get_or_create("file1.txt".to_string(), "content1".to_string(), true);
-        ws.get_or_create("file2.txt".to_string(), "content2".to_string(), true);
+        ws.get_or_create("file1.txt", "content1", true);
+        ws.get_or_create("file2.txt", "content2", true);
 
         let snapshot = ws.get_snapshot();
         assert_eq!(snapshot.len(), 2);
@@ -307,7 +310,7 @@ mod tests {
         // Verify we can hydrate a new workspace from this snapshot
         let mut new_ws = Workspace::new("peer".to_string());
         for (uri, patch) in snapshot {
-            let doc = new_ws.get_or_create_empty(uri, false);
+            let doc = new_ws.get_or_create_empty(uri.as_str(), false);
             doc.apply_remote_patch(&patch);
         }
         
@@ -317,8 +320,8 @@ mod tests {
 
     #[test]
     fn test_complex_convergence() {
-        let mut peer_a = Document::new("".to_string(), "a", true);
-        let mut peer_b = Document::new("".to_string(), "b", false);
+        let mut peer_a = Document::new("", "a", true);
+        let mut peer_b = Document::new("", "b", false);
 
         // 1. A types something
         let patch1 = peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {

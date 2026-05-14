@@ -66,6 +66,11 @@ pub enum Event {
     RemoteFullSync {
         files: Vec<(String, Vec<u8>)>,
     },
+
+    /// The session was successfully registered on the relay
+    SessionRegistered {
+        name: String,
+    },
 }
 
 pub struct Core {
@@ -108,15 +113,15 @@ impl Core {
                             self.handle_local_change(uri, changes, is_host).await;
                         }
                         Event::RemotePatch { uri, patch } => {
-                            self.handle_remote_patch(uri, patch, is_host).await;
+                            self.handle_remote_patch(uri, &patch, is_host);
                         }
                         Event::LoadFromDisk { uri, content } => {
                             // Just update state, don't load into editor
-                            self.workspace.get_or_create(uri.clone(), content.clone(), is_host);
+                            self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                             self.last_flushed_ropes.insert(uri, Rope::from_str(&content));
                         }
                         Event::ClientDidOpen { uri, content } => {
-                            self.workspace.get_or_create(uri.clone(), content.clone(), is_host);
+                            self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                             self.workspace.mark_open(uri.clone());
                             self.last_flushed_ropes.insert(uri, Rope::from_str(&content));
                         }
@@ -163,7 +168,7 @@ impl Core {
                                 let is_open = self.workspace.documents.contains_key(&uri);
 
                                 // Hydrate Memory
-                                let doc = self.workspace.get_or_create_empty(uri.clone(), is_host);
+                                let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
                                 let _ = doc.apply_remote_patch(&patch);
 
                                 // Mark files as dirty
@@ -178,12 +183,14 @@ impl Core {
                             // Write to Disk
                             if let Err(e) = fs.write_project_files(files_to_write) {
                                 logger::log(&format!(
-                                    "!! [Disk] Failed to write synced files: {}",
-                                    e
+                                    "!! [Disk] Failed to write synced files: {e}"
                                 ));
                             } else {
                                 logger::log(">> [Disk] Full sync written to storage.");
                             }
+                        }
+                        Event::SessionRegistered { name } => {
+                            logger::log(&format!(">> [Core] Session registered as: {name}"));
                         }
                         Event::Shutdown => break,
                     }
@@ -203,7 +210,7 @@ impl Core {
         is_host: bool,
     ) {
         // Get the document
-        let doc = self.workspace.get_or_create_empty(uri.clone(), is_host);
+        let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
 
         // Apply logic (The logic inside Document should return the binary patch if effective)
         let uri_ref = uri.clone();
@@ -222,9 +229,9 @@ impl Core {
         }
     }
 
-    async fn handle_remote_patch(&mut self, uri: String, patch: Vec<u8>, is_host: bool) {
-        let doc = self.workspace.get_or_create_empty(uri.clone(), is_host);
-        let _ = doc.apply_remote_patch(&patch);
+    fn handle_remote_patch(&mut self, uri: String, patch: &[u8], is_host: bool) {
+        let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
+        let _ = doc.apply_remote_patch(patch);
 
         if self.workspace.is_open(&uri) {
             self.dirty_files.insert(uri);
@@ -233,7 +240,7 @@ impl Core {
 
     async fn flush_dirty_files(&mut self, is_host: bool) {
         for uri in self.dirty_files.drain().collect::<Vec<_>>() {
-            let doc = self.workspace.get_or_create_empty(uri.clone(), is_host);
+            let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
 
             let old_rope = self
                 .last_flushed_ropes

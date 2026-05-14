@@ -15,6 +15,7 @@ pub enum EditorCommand {
     RemoteCursor { uri: String, position: Position },
 }
 
+#[async_trait::async_trait]
 pub trait EditorAdapter {
     /// Orchestrator: The main loop, orchestrating handler behavior
     async fn run(
@@ -23,6 +24,7 @@ pub trait EditorAdapter {
     );
 }
 
+#[must_use]
 pub fn is_ignored(uri: &str) -> bool {
     uri.is_empty() || uri == "/" || uri.starts_with("oil://")
 }

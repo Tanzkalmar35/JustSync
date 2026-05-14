@@ -3,7 +3,7 @@ use std::process::exit;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use JustSync::{
+use just_sync::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
     internal::{
         core::{Core, Event},

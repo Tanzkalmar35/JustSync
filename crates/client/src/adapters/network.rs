@@ -17,7 +17,8 @@ use crate::{
 };
 
 pub struct QuicNetworkAdapter {
-    session: SessionCfg, peers: Arc<Mutex<HashMap<String, SendStream>>>,
+    session: SessionCfg,
+    peers: Arc<Mutex<HashMap<String, SendStream>>>,
     core_send: mpsc::Sender<Event>,
     core_recv: Mutex<mpsc::Receiver<NetworkCommand>>,
 }
@@ -32,7 +33,7 @@ impl QuicNetworkAdapter {
         relay_addr: SocketAddr,
         token: &str,
     ) -> Result<quinn::Connection, Box<dyn std::error::Error>> {
-        logger::log(&format!("Connecting to relay at {}...", relay_addr));
+        logger::log(&format!("Connecting to relay at {relay_addr}!"));
         // Setup connection
         let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
         let cfg = configure_client(token);
@@ -57,11 +58,11 @@ impl QuicNetworkAdapter {
                     Ok((send, recv)) => {
                         let self_accept = Arc::clone(&self_accept);
                         if let Err(e) = self_accept.accept_peer(send, recv).await {
-                            logger::log(&format!("!! [Network] accept_peer failed: {}", e));
+                            logger::log(&format!("!! [Network] accept_peer failed: {e}"));
                         }
                     }
                     Err(e) => {
-                        logger::log(&format!("!! [Network] accept_bi failed: {}", e));
+                        logger::log(&format!("!! [Network] accept_bi failed: {e}"));
                         break;
                     }
                 }
@@ -69,7 +70,7 @@ impl QuicNetworkAdapter {
         });
 
         if let SessionRole::Peer { session_name } = &self.session.role {
-            self.join_session(&mut send, &mut recv, session_name.to_string())
+            self.join_session(&mut send, &mut recv, session_name.clone())
                 .await?;
         } else {
             self.init_session(&mut send, &mut recv).await?;
@@ -103,7 +104,8 @@ impl QuicNetworkAdapter {
             .await
             .expect("Couldn't send verify message");
 
-        let msg: ControlMessage = self.recv_framed(&mut recv)
+        let msg: ControlMessage = self
+            .recv_framed(&mut recv)
             .await
             .expect("Unable to deserialize incoming message");
 
@@ -113,8 +115,7 @@ impl QuicNetworkAdapter {
         } = msg
         {
             logger::log(&format!(
-                ">> [Network] Connected to peer {} (host: {})",
-                remote_agent_id, remote_is_host
+                ">> [Network] Connected to peer {remote_agent_id} (host: {remote_is_host})",
             ));
 
             self.peers
@@ -140,7 +141,7 @@ impl QuicNetworkAdapter {
                 self_recv.recv_loop(recv).await;
             });
         } else {
-            panic!("Invalid setup msg received, expected Init, got {:?}", msg);
+            panic!("Invalid setup msg received, expected Init, got {msg:?}");
         }
 
         Ok(())
@@ -152,14 +153,13 @@ impl QuicNetworkAdapter {
                 Ok(wire_msg) => {
                     let event = into_internal(wire_msg, self.is_host());
                     match self.core_send.send(event.clone()).await {
-                        Ok(_) => logger::log("Sent patch to core!"),
-                        Err(e) => logger::log(&format!("Couldn't send patch to remote: {}", e)),
+                        Ok(()) => logger::log("Sent patch to core!"),
+                        Err(e) => logger::log(&format!("Couldn't send patch to remote: {e}")),
                     }
                 }
                 Err(e) => {
                     crate::logger::log(&format!(
-                        "!! [Network] Read error (connection closed): {}",
-                        e
+                        "!! [Network] Read error (connection closed): {e}"
                     ));
                     break;
                 }
@@ -181,7 +181,8 @@ impl QuicNetworkAdapter {
 
         if let ControlMessage::SessionCreated { status, name } = response {
             if status.eq("ok") {
-                logger::log(&format!("Created session - name: {}", name));
+                logger::log(&format!("Created session - name: {name}"));
+                let _ = self.core_send.send(Event::SessionRegistered { name }).await;
             } else {
                 return Err(anyhow::Error::msg(
                     "Unable to init session on relay server!",
@@ -202,7 +203,7 @@ impl QuicNetworkAdapter {
         recv: &mut quinn::RecvStream,
         session_name: String,
     ) -> anyhow::Result<()> {
-        logger::log(&format!("Joining session {}...", session_name));
+        logger::log(&format!("Joining session {session_name}!"));
         let msg = ControlMessage::Join {
             name: session_name,
             key: self.session.key.clone(),
@@ -243,12 +244,9 @@ impl QuicNetworkAdapter {
 
     async fn broadcast(&self, peers: &mut HashMap<String, quinn::SendStream>, msg: WireMessage) {
         for (agent_id, send) in peers.iter_mut() {
-            logger::log(&format!("Broadcasting to peer {}", agent_id));
+            logger::log(&format!("Broadcasting to peer {agent_id}"));
             if let Err(e) = self.send_framed(send, &msg).await {
-                logger::log(&format!(
-                    "!! [Network] Broadcast to {} failed: {}",
-                    agent_id, e
-                ));
+                logger::log(&format!("!! [Network] Broadcast to {agent_id} failed: {e}"));
             }
         }
     }
@@ -258,7 +256,7 @@ impl QuicNetworkAdapter {
         T: Sized + Serialize,
     {
         let bytes = serde_json::to_vec(&msg)?;
-        let len = bytes.len() as u32;
+        let len = u32::try_from(bytes.len())?;
 
         send.write_all(&len.to_be_bytes()).await?;
         send.write_all(&bytes).await?;
@@ -287,6 +285,7 @@ impl QuicNetworkAdapter {
     }
 }
 
+#[async_trait::async_trait]
 impl NetworkAdapter for QuicNetworkAdapter {
     async fn connect_and_run(
         session: internal::network::SessionCfg,
@@ -301,11 +300,14 @@ impl NetworkAdapter for QuicNetworkAdapter {
         };
 
         // Pass empty token for now -> FIXME
-        let conn = match adapter.connect(session.relay_addr, "").await { 
+        let conn = match adapter.connect(session.relay_addr, "").await {
             Ok(conn) => conn,
             Err(e) => panic!("{}", e),
         };
 
-        Arc::new(adapter).run_peer(conn).await.expect("Failed to run peer network adapter");
+        Arc::new(adapter)
+            .run_peer(conn)
+            .await
+            .expect("Failed to run peer network adapter");
     }
 }

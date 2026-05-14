@@ -17,7 +17,7 @@ static LOG_FILE: OnceLock<String> = OnceLock::new();
 /// 2. Something went wrong deleting the old log file - no previous file existing is okay and
 ///    handled, that's not a panic!
 pub fn init(suffix: &str) {
-    let filename = format!("/tmp/justsync-{}.log", suffix);
+    let filename = format!("/tmp/justsync-{suffix}.log");
     LOG_FILE.set(filename).unwrap();
 
     let path = LOG_FILE.get().unwrap();
@@ -27,7 +27,7 @@ pub fn init(suffix: &str) {
     if let Err(e) = deleted
         && e.kind() != ErrorKind::NotFound
     {
-        panic!("Unable to prepare log file: {}", e);
+        panic!("Unable to prepare log file: {e}");
     }
 }
 
@@ -35,7 +35,11 @@ pub fn init(suffix: &str) {
 ///
 /// # Arguments
 ///
-/// * `msg` - The message to write to the file - format: '\[process_id] msg'
+/// * `msg` - The message to write to the file - format: '\[`process_id`] msg'
+///
+/// # Panics
+///
+/// * If the log file can not be opened or created whatsoever
 pub fn log(msg: &str) {
     let unknown_path = "/tmp/justsync.log".to_string();
     let path = LOG_FILE.get().unwrap_or(&unknown_path);
@@ -55,5 +59,5 @@ pub fn log(msg: &str) {
         .unwrap();
 
     // Write with PID prefix
-    let _ = writeln!(file, "[{}] {}", time, msg);
+    let _ = writeln!(file, "[{time}] {msg}");
 }

@@ -1,5 +1,5 @@
 [package]
-name = "JustSync"
+name = "just_sync"
 version = "0.1.0"
 edition = "2024"
 
@@ -24,6 +24,9 @@ proptest = "1.9.0"
 dissimilar = "1.0.10"
 chrono = "0.4.44"
 mockall = "0.14.0"
+async-trait = "0.1.89"
 
 [dev-dependencies]
 tempfile = "3"
+server = { path = "../server" }
+rustls-pki-types = "1"

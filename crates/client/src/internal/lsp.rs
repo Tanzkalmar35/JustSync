@@ -95,6 +95,16 @@ pub struct InitializeParams {
 //     pub text_doc_sync: i32, // 1 = full, 2 = incremental
 // }
 
+/// Waits for and reads a new message from the given reader
+///
+/// # Arguments
+///
+/// * `reader` - The reader to receive the message from
+///
+/// # Errors
+///
+/// * If a new message can't be read
+/// * If the incoming message is empty
 pub async fn read_message<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
 ) -> Result<Option<String>> {

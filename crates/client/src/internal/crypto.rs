@@ -30,6 +30,15 @@ pub struct TokenVerifier {
 }
 
 impl TokenVerifier {
+    /// Initializes a new token verifier
+    ///
+    /// # Arguments
+    ///
+    /// * `token_hex` - A hex encoded token to use for verification
+    ///
+    /// # Panics
+    ///
+    /// * If the given `token_hex` isn't correctly hex-encoded. (So the decoding fails)
     pub fn new(token_hex: &str) -> Arc<Self> {
         let bytes = hex::decode(token_hex).expect("Invalid token format, expected hash");
         Arc::new(Self {

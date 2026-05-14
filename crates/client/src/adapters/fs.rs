@@ -17,9 +17,8 @@ impl FsOps for FileSystem {
                     let path = entry.path();
 
                     let is_dir = path.is_dir();
-                    let file_name = match path.file_name().and_then(|n| n.to_str()) {
-                        Some(n) => n,
-                        None => continue,
+                    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
                     };
 
                     if file_name.starts_with('.')
@@ -65,7 +64,7 @@ impl FsOps for FileSystem {
                 logger::log("Ignoring empty file path");
                 continue;
             } else {
-                logger::log(&format!(">> [FS DEBUG] Found file: {}", path_str));
+                logger::log(&format!(">> [FS DEBUG] Found file: {path_str}"));
             }
 
             // Ensure we are writing relatively to CWD
@@ -76,7 +75,7 @@ impl FsOps for FileSystem {
                 .components()
                 .any(|c| matches!(c, std::path::Component::ParentDir))
             {
-                crate::logger::log(&format!("!! [FS] Skipped unsafe path: {}", path_str));
+                crate::logger::log(&format!("!! [FS] Skipped unsafe path: {path_str}"));
                 continue;
             }
 
@@ -85,7 +84,7 @@ impl FsOps for FileSystem {
             }
 
             fs::write(path, content)?;
-            crate::logger::log(&format!(">> [FS] Wrote: {}", path_str));
+            crate::logger::log(&format!(">> [FS] Wrote: {path_str}"));
         }
         Ok(())
     }

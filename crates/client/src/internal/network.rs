@@ -68,6 +68,7 @@ pub enum SessionRole {
     Peer { session_name: String },
 }
 
+#[async_trait::async_trait]
 pub trait NetworkAdapter: Send {
     async fn connect_and_run(
         session: SessionCfg,
@@ -76,10 +77,11 @@ pub trait NetworkAdapter: Send {
     );
 }
 
+#[must_use]
 pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
     match cmd {
         WireMessage::Patch { uri, data } => {
-            logger::log(&format!(">> [Network] Received patch for {}", uri));
+            logger::log(&format!(">> [Network] Received patch for {uri}"));
             Event::RemotePatch { uri, patch: data }
         }
         WireMessage::Cursor { uri, position } => {
@@ -110,6 +112,7 @@ pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
     }
 }
 
+#[must_use]
 pub fn into_external(cmd: NetworkCommand) -> WireMessage {
     match cmd {
         NetworkCommand::BroadcastCursor { uri, position } => WireMessage::Cursor { uri, position },
@@ -118,6 +121,7 @@ pub fn into_external(cmd: NetworkCommand) -> WireMessage {
     }
 }
 
+#[must_use]
 pub fn make_transport_config() -> TransportConfig {
     let mut transport_config = TransportConfig::default();
     transport_config.max_concurrent_bidi_streams(VarInt::from_u32(100));
@@ -127,6 +131,16 @@ pub fn make_transport_config() -> TransportConfig {
     transport_config
 }
 
+/// Configures client's network security options
+/// 
+/// # Arguments
+///
+/// * `token` - The TLS token
+///
+/// # Panics
+///
+/// * If the crypto config couldn't be applied to the `QuicClientConfig`
+#[must_use]
 pub fn configure_client(token: &str) -> ClientConfig {
     // Use own verifier
     let verifier = TokenVerifier::new(token);

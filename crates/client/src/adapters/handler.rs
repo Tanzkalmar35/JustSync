@@ -110,18 +110,17 @@ impl StdioAdapter {
     }
 
     async fn process_editor_message(&self, header: LspHeader) {
-        let method = match header.method {
-            Some(ref m) => m,
-            None => return,
+        let Some(ref method) = header.method else {
+            return;
         };
 
         match method.as_str() {
             "textDocument/didOpen" => handle_open_cmd(header, &self.core_tx, &self.root_dir).await,
             "textDocument/didChange" => {
-                handle_change_cmd(header, &self.core_tx, &self.root_dir).await
+                handle_change_cmd(header, &self.core_tx, &self.root_dir).await;
             }
             "textDocument/didClose" => {
-                handle_close_cmd(header, &self.core_tx, &self.root_dir).await
+                handle_close_cmd(header, &self.core_tx, &self.root_dir).await;
             }
             "$/justsync/cursor" => handle_cursor_cmd(header, &self.core_tx, &self.root_dir).await,
             _ => {
@@ -131,6 +130,7 @@ impl StdioAdapter {
     }
 }
 
+#[async_trait::async_trait]
 impl EditorAdapter for StdioAdapter {
     async fn run(&mut self, mut editor_rx: mpsc::Receiver<EditorCommand>) {
         self.init().await.expect("Editor adapter init failed!");
@@ -147,7 +147,7 @@ impl EditorAdapter for StdioAdapter {
                             break;
                         }
                         Err(e) => {
-                            logger::log(&format!("!! Adapter Error: {}", e));
+                            logger::log(&format!("!! Adapter Error: {e}"));
                             break;
                         }
                     }
@@ -156,7 +156,7 @@ impl EditorAdapter for StdioAdapter {
                 // OUTBOUND: Core -> Handler -> Editor
                 Some(cmd) = editor_rx.recv() => {
                     if let Err(e) = self.send_cmd(cmd).await {
-                        logger::log(&format!("!! Failed to send to editor: {}", e));
+                        logger::log(&format!("!! Failed to send to editor: {e}"));
                     }
                 }
             }

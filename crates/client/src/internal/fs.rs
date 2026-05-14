@@ -5,6 +5,7 @@ pub trait FsOps {
     fn write_project_files(&self, files: Vec<(String, String)>) -> anyhow::Result<()>;
 }
 
+#[must_use]
 pub fn to_relative_path(uri: &str, root: &str) -> String {
     let clean_uri = uri.replace("%20", " ");
     let clean_root = root.replace("%20", " ");

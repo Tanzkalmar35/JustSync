@@ -3,33 +3,6 @@
 version = 4
 
 [[package]]
-name = "JustSync"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "clap",
- "diamond-types",
- "dissimilar",
- "hex",
- "mockall",
- "proptest",
- "quinn",
- "rcgen",
- "ring",
- "ropey",
- "rustls",
- "serde",
- "serde_json",
- "socket2",
- "tempfile",
- "tokio",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -127,6 +100,17 @@ name = "asn1-rs-impl"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -739,6 +723,36 @@ checksum = "829c74fe88dda0d2a5425b022b44921574a65c4eb78e6e39a61b40eb416a4ef8"
 dependencies = [
  "rand 0.8.5",
  "str_indices 0.4.4",
+]
+
+[[package]]
+name = "just_sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "clap",
+ "diamond-types",
+ "dissimilar",
+ "hex",
+ "mockall",
+ "proptest",
+ "quinn",
+ "rcgen",
+ "ring",
+ "ropey",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "server",
+ "socket2",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -1548,6 +1562,7 @@ name = "server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "dashmap",
  "hex",
  "petname",
