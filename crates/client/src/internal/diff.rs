@@ -132,6 +132,36 @@ fn offset_to_position(rope: &Rope, char_idx: usize) -> Position {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    // Helper to apply edits to a string for verification
+    fn apply_edits_to_string(text: &str, edits: &[TextEdit]) -> String {
+        let mut rope = Rope::from_str(text);
+        // We must apply edits in reverse order if they overlap, but since 
+        // calculate_edits should return non-overlapping edits in order,
+        // we can apply them by calculating the character offsets.
+        // However, the safest way to verify is to apply them one by one, 
+        // but note that each edit's range refers to the ORIGINAL rope.
+        // Thus, we apply them from back to front to avoid shifting indices.
+        let mut sorted_edits = edits.to_vec();
+        sorted_edits.sort_by(|a, b| {
+            let a_start = a.range.start.line * 1000000 + a.range.start.character;
+            let b_start = b.range.start.line * 1000000 + b.range.start.character;
+            b_start.cmp(&a_start)
+        });
+
+        for edit in sorted_edits {
+            let start_line_idx = rope.line_to_char(edit.range.start.line);
+            let start_idx = start_line_idx + edit.range.start.character;
+
+            let end_line_idx = rope.line_to_char(edit.range.end.line);
+            let end_idx = end_line_idx + edit.range.end.character;
+
+            rope.remove(start_idx..end_idx);
+            rope.insert(start_idx, &edit.new_text);
+        }
+        rope.to_string()
+    }
 
     #[test]
     fn equal_content_gives_no_edits_end() {
@@ -144,162 +174,46 @@ mod tests {
     }
 
     #[test]
-    fn add_content_only_insertions_empty() {
-        let old_content = Rope::from_str("");
-        let new_content = Rope::from_str("Content ");
+    fn test_multiline_edit() {
+        let old = "line1\nline2\nline3";
+        let new = "line1\nchanged\nline3";
+        let old_rope = Rope::from_str(old);
+        let new_rope = Rope::from_str(new);
 
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "Content ")
+        let edits = calculate_edits(&old_rope, &new_rope);
+        assert_eq!(apply_edits_to_string(old, &edits), new);
     }
 
     #[test]
-    fn add_content_only_insertions_beginning() {
-        let old_content = Rope::from_str("Some content");
-        let new_content = Rope::from_str("Additionally Some content");
+    fn test_unicode_emoji() {
+        let old = "Hello 🦀 World";
+        let new = "Hello 🦀 Rust";
+        let old_rope = Rope::from_str(old);
+        let new_rope = Rope::from_str(new);
 
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "Additionally ")
-    }
-    
-    #[test]
-    fn add_content_only_insertions_middle() {
-        let old_content = Rope::from_str("Some content");
-        let new_content = Rope::from_str("Some additional content");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "additional ")
+        let edits = calculate_edits(&old_rope, &new_rope);
+        assert_eq!(apply_edits_to_string(old, &edits), new);
     }
 
     #[test]
-    fn added_content_only_insertions_end() {
-        let old_content = Rope::from_str("Some content");
-        let new_content = Rope::from_str("Some content addition");
+    fn test_newline_insertion() {
+        let old = "line1line2";
+        let new = "line1\nline2";
+        let old_rope = Rope::from_str(old);
+        let new_rope = Rope::from_str(new);
 
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, " addition")
+        let edits = calculate_edits(&old_rope, &new_rope);
+        assert_eq!(apply_edits_to_string(old, &edits), new);
     }
 
-    #[test]
-    fn deleted_content_only_deletions_beginning() {
-        let old_content = Rope::from_str("Additionally Some content");
-        let new_content = Rope::from_str("Some content");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "")
-    }
-
-    #[test]
-    fn deleted_content_only_deletions_end() {
-        let old_content = Rope::from_str("Some content addition");
-        let new_content = Rope::from_str("Some content");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "")
-    }
-
-    #[test]
-    fn deleted_content_only_deletions_middle() {
-        let old_content = Rope::from_str("Some middle content");
-        let new_content = Rope::from_str("Some content");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "")
-    }
-
-    #[test]
-    fn deleted_content_only_deletions_empty() {
-        let old_content = Rope::from_str("Content");
-        let new_content = Rope::from_str("");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "")
-    }
-
-    #[test]
-    fn full_replacement() {
-        let old_content = Rope::from_str("Old text");
-        let new_content = Rope::from_str("Completely new");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 2);
-        assert_eq!(diff.first().unwrap().new_text, "");
-        assert_eq!(diff.get(1).unwrap().new_text, "Completely new");
-    }
-
-    #[test]
-    fn parital_replacement() {
-        let old_content = Rope::from_str("Hello World!");
-        let new_content = Rope::from_str("Hello Earthlings!");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 2);
-        assert_eq!(diff.first().unwrap().new_text, "");
-        assert_eq!(diff.get(1).unwrap().new_text, "Earthlings");
-    }
-
-    #[test]
-    fn same_length_replacement() {
-        let old_content = Rope::from_str("asd");
-        let new_content = Rope::from_str("xyz");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 2);
-        assert_eq!(diff.first().unwrap().new_text, "");
-        assert_eq!(diff.get(1).unwrap().new_text, "xyz");
-    }
-
-    #[test]
-    fn shared_prefix_and_suffix() {
-        let old_content = Rope::from_str("abXcd");
-        let new_content = Rope::from_str("abYcd");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 2);
-        assert_eq!(diff.first().unwrap().new_text, "");
-        assert_eq!(diff.get(1).unwrap().new_text, "Y");
-    }
-
-    #[test]
-    fn suffix_does_not_overlap_prefix() {
-        let old_content = Rope::from_str("abXc");
-        let new_content = Rope::from_str("abc");
-
-        let diff = calculate_edits(&old_content, &new_content);
-
-        assert!(!diff.is_empty());
-        assert_eq!(diff.len(), 1);
-        assert_eq!(diff.first().unwrap().new_text, "");
+    proptest! {
+        #[test]
+        fn prop_diff_is_correct(old in "\\PC*", new in "\\PC*") {
+            let old_rope = Rope::from_str(&old);
+            let new_rope = Rope::from_str(&new);
+            let edits = calculate_edits(&old_rope, &new_rope);
+            let result = apply_edits_to_string(&old, &edits);
+            prop_assert_eq!(result, new);
+        }
     }
 }

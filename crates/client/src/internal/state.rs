@@ -224,3 +224,129 @@ impl Document {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::internal::lsp::{Position, Range};
+
+    #[test]
+    fn test_echo_suppression() {
+        let mut doc = Document::new("initial".to_string(), "agent-1", true);
+        
+        // Simulate a remote update pending
+        doc.pending_remote_updates.store(1, Ordering::SeqCst);
+
+        // A local change comes in (echo)
+        let change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 0 },
+            }),
+            text: "ignored".to_string(),
+        };
+
+        let patch = doc.apply_local_changes(vec![change]);
+        
+        // Must be None because it was suppressed
+        assert!(patch.is_none());
+        // Counter should be decremented
+        assert_eq!(doc.pending_remote_updates.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_crdt_convergence_with_hydration() {
+        // 1. Host starts with "Hello"
+        let mut host = Document::new("Hello".to_string(), "host-agent", true);
+        
+        // 2. Peer starts empty
+        let mut peer = Document::new("".to_string(), "peer-agent", false);
+
+        // 3. Initial Hydration: Host sends its current state to Peer
+        let hydration_patch = host.crdt.oplog.encode(diamond_types::list::encoding::EncodeOptions::default());
+        peer.apply_remote_patch(&hydration_patch);
+        
+        assert_eq!(peer.content.to_string(), "Hello");
+
+        // 4. Concurrent changes
+        let change_host = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position { line: 0, character: 5 },
+                end: Position { line: 0, character: 5 },
+            }),
+            text: " Alice".to_string(),
+        };
+        let patch_host = host.apply_local_changes(vec![change_host]).unwrap();
+
+        let change_peer = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position { line: 0, character: 5 },
+                end: Position { line: 0, character: 5 },
+            }),
+            text: " Bob".to_string(),
+        };
+        let patch_peer = peer.apply_local_changes(vec![change_peer]).unwrap();
+
+        // 5. Swap patches
+        host.apply_remote_patch(&patch_peer);
+        peer.apply_remote_patch(&patch_host);
+
+        // 6. They must converge
+        assert_eq!(host.content.to_string(), peer.content.to_string());
+    }
+
+    #[test]
+    fn test_workspace_snapshot() {
+        let mut ws = Workspace::new("host".to_string());
+        ws.get_or_create("file1.txt".to_string(), "content1".to_string(), true);
+        ws.get_or_create("file2.txt".to_string(), "content2".to_string(), true);
+
+        let snapshot = ws.get_snapshot();
+        assert_eq!(snapshot.len(), 2);
+        
+        // Verify we can hydrate a new workspace from this snapshot
+        let mut new_ws = Workspace::new("peer".to_string());
+        for (uri, patch) in snapshot {
+            let doc = new_ws.get_or_create_empty(uri, false);
+            doc.apply_remote_patch(&patch);
+        }
+        
+        assert_eq!(new_ws.documents.get("file1.txt").unwrap().content.to_string(), "content1");
+        assert_eq!(new_ws.documents.get("file2.txt").unwrap().content.to_string(), "content2");
+    }
+
+    #[test]
+    fn test_complex_convergence() {
+        let mut peer_a = Document::new("".to_string(), "a", true);
+        let mut peer_b = Document::new("".to_string(), "b", false);
+
+        // 1. A types something
+        let patch1 = peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
+            range: Some(Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } }),
+            text: "The quick brown fox".to_string(),
+        }]).unwrap();
+        
+        // 2. B receives it
+        peer_b.apply_remote_patch(&patch1);
+
+        // 3. Concurrent edits: A deletes "quick", B inserts "lazy " before "fox"
+        let patch_a = peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
+            range: Some(Range { start: Position { line: 0, character: 4 }, end: Position { line: 0, character: 10 } }),
+            text: "".to_string(),
+        }]).unwrap();
+
+        let patch_b = peer_b.apply_local_changes(vec![TextDocumentContentChangeEvent {
+            range: Some(Range { start: Position { line: 0, character: 16 }, end: Position { line: 0, character: 16 } }),
+            text: "lazy ".to_string(),
+        }]).unwrap();
+
+        // 4. Swap patches
+        peer_a.apply_remote_patch(&patch_b);
+        peer_b.apply_remote_patch(&patch_a);
+
+        // 5. Verify convergence
+        assert_eq!(peer_a.content.to_string(), peer_b.content.to_string());
+        assert!(peer_a.content.to_string().contains("lazy"));
+        assert!(!peer_a.content.to_string().contains("quick"));
+    }
+}

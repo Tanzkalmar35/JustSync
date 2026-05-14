@@ -16,15 +16,6 @@ static LOG_FILE: OnceLock<String> = OnceLock::new();
 /// 1. For some reason, the file path could not be initialized
 /// 2. Something went wrong deleting the old log file - no previous file existing is okay and
 ///    handled, that's not a panic!
-///
-/// # Examples
-///
-/// ```
-/// use std::fs;
-///
-/// logger::init();
-/// assert!(fs::exists("/tmp/justsync.log"));
-/// ```
 pub fn init(suffix: &str) {
     let filename = format!("/tmp/justsync-{}.log", suffix);
     LOG_FILE.set(filename).unwrap();
@@ -45,16 +36,6 @@ pub fn init(suffix: &str) {
 /// # Arguments
 ///
 /// * `msg` - The message to write to the file - format: '\[process_id] msg'
-///
-/// # Examples
-///
-/// ```
-/// use std::fs;
-///
-/// logger::init();
-/// logger::log("Test message!");
-/// assert_eq!(fs::read("/tmp/justsync.log").unwrap(), "Test message!".as_bytes());
-/// ```
 pub fn log(msg: &str) {
     let unknown_path = "/tmp/justsync.log".to_string();
     let path = LOG_FILE.get().unwrap_or(&unknown_path);

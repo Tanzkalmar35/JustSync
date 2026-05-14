@@ -3,7 +3,7 @@ use std::process::exit;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::{
+use JustSync::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
     internal::{
         core::{Core, Event},
@@ -11,11 +11,8 @@ use crate::{
         handler::EditorAdapter,
         network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
     },
+    logger,
 };
-
-pub mod adapters;
-pub mod internal;
-pub mod logger;
 
 struct Context {
     mode: String,

@@ -1,8 +1,8 @@
-pub(crate) mod core;
-pub(crate) mod crypto;
-pub(crate) mod diff;
-pub(crate) mod lsp;
-pub(crate) mod state;
-pub(crate) mod network;
-pub(crate) mod fs;
-pub(crate) mod handler;
+pub mod core;
+pub mod crypto;
+pub mod diff;
+pub mod lsp;
+pub mod state;
+pub mod network;
+pub mod fs;
+pub mod handler;

@@ -94,3 +94,79 @@ impl ServerCertVerifier for TokenVerifier {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_token_verifier_success() {
+        // 1. Generate a real cert to test against
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let cert_der = cert.cert.der().clone();
+        
+        // 2. Calculate the token (hex hash)
+        let hash = digest(&SHA256, cert_der.as_ref());
+        let token = hex::encode(hash.as_ref());
+
+        // 3. Create verifier
+        let verifier = TokenVerifier::new(&token);
+
+        // 4. Verify
+        let der = CertificateDer::from(cert_der.as_ref());
+        let result = verifier.verify_server_cert(
+            &der,
+            &[],
+            &ServerName::try_from("localhost").unwrap(),
+            &[],
+            UnixTime::now(),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_token_verifier_failure() {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let cert_der = cert.cert.der().clone();
+        
+        // Create verifier with a WRONG token
+        let verifier = TokenVerifier::new("0000000000000000000000000000000000000000000000000000000000000000");
+
+        let der = CertificateDer::from(cert_der.as_ref());
+        let result = verifier.verify_server_cert(
+            &der,
+            &[],
+            &ServerName::try_from("localhost").unwrap(),
+            &[],
+            UnixTime::now(),
+        );
+
+        assert!(result.is_err());
+        if let Err(Error::General(msg)) = result {
+            assert!(msg.contains("SECURITY ALERT"));
+        } else {
+            panic!("Expected security alert error");
+        }
+    }
+
+    #[test]
+    fn test_token_verifier_skip() {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let cert_der = cert.cert.der().clone();
+        
+        // Empty token should skip verification
+        let verifier = TokenVerifier::new("");
+
+        let der = CertificateDer::from(cert_der.as_ref());
+        let result = verifier.verify_server_cert(
+            &der,
+            &[],
+            &ServerName::try_from("localhost").unwrap(),
+            &[],
+            UnixTime::now(),
+        );
+
+        assert!(result.is_ok());
+    }
+}
