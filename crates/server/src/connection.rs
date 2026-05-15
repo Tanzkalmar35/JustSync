@@ -4,6 +4,16 @@ use tokio::io::AsyncWriteExt;
 
 use crate::models::Connection;
 
+/// Hotwires 2 peers together
+///
+/// # Arguments
+///
+/// * `a` - First peer to connect to second
+/// * `b` - Second peer to connect to first
+///
+/// # Panics
+///
+/// * If either way streams (a->b or b->a) can't be opened
 pub async fn hotwire(a: Arc<dyn Connection>, b: Arc<dyn Connection>) -> () {
     // Open a <-> relay and b <-> relay streams
     println!("Hotwiring {} to {}", a.remote_address(), b.remote_address());
@@ -24,13 +34,13 @@ pub async fn hotwire(a: Arc<dyn Connection>, b: Arc<dyn Connection>) -> () {
     // Join streams
     tokio::spawn(async move {
         if let Err(e) = tokio::io::copy(&mut b_recv, &mut a_send).await {
-            eprintln!("Hotwire copy (B->A) error: {}", e);
+            eprintln!("Hotwire copy (B->A) error: {e}");
         }
         let _ = a_send.shutdown().await;
     });
     tokio::spawn(async move {
         if let Err(e) = tokio::io::copy(&mut a_recv, &mut b_send).await {
-            eprintln!("Hotwire copy (A->B) error: {}", e);
+            eprintln!("Hotwire copy (A->B) error: {e}");
         }
         let _ = b_send.shutdown().await;
     });

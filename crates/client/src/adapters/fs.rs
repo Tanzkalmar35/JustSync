@@ -45,7 +45,7 @@ impl FsOps for FileSystem {
                         // Convert Cow<str> to String
                         let relative_path = relative_path_cow.into_owned();
 
-                        let uri = relative_path.replace("\\", "/");
+                        let uri = relative_path.replace('\\', "/");
 
                         logger::log(&format!("Found file {}", &uri));
                         results.push((uri, content));

@@ -13,6 +13,7 @@ use crate::{
     logger,
 };
 
+#[must_use]
 pub struct Workspace {
     pub documents: HashMap<String, Document>,
     pub local_agent_id: String,

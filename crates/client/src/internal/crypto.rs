@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 /// Own special verifier for the peer
 #[derive(Debug)]
+#[must_use]
 pub struct TokenVerifier {
     expected_hash: Vec<u8>,
 }

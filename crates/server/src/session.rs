@@ -23,6 +23,23 @@ impl Session {
         }
     }
 
+    /// Allows peers to join the session
+    ///
+    /// # Arguments
+    ///
+    /// * `peer` - The peer to join
+    /// * `key` - The provided session key
+    /// * `send` - The sender to the control channel
+    ///
+    /// # Errors
+    ///
+    /// * If the provided session key does not match the actual
+    /// * If `send` can't send a shutdown command
+    ///
+    /// # Panics
+    ///
+    /// * If no lock on 
+    /// * If `send` can't report status
     pub async fn join<W>(
         &mut self,
         peer: Arc<dyn Connection>,

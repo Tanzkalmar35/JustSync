@@ -73,6 +73,7 @@ pub enum Event {
     },
 }
 
+#[must_use]
 pub struct Core {
     // The State
     workspace: Workspace,

@@ -10,6 +10,7 @@ pub struct Server {
 }
 
 impl Server {
+    #[must_use]
     pub fn setup() -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
@@ -24,17 +25,27 @@ impl Server {
         self.sessions.insert(session.name.clone(), session);
     }
 
-    pub fn deregister_session(&self, s: String) -> Result<(), String> {
-        if !self.sessions.contains_key(&s) {
+    /// Deregisters a session from the relay server
+    ///
+    /// # Arguments
+    ///
+    /// * `s` - The session to close
+    ///
+    /// # Errors
+    ///
+    /// * If the session to deregister isn't even registered
+    pub fn deregister_session(&self, s: &str) -> Result<(), String> {
+        if !self.sessions.contains_key(s) {
             return Err(String::from(
                 "Error deregistering session - No session to deregister found!",
             ));
         }
 
-        self.sessions.remove(&s);
+        self.sessions.remove(s);
         Ok(())
     }
 
+    #[must_use]
     pub fn find_session(&self, name: &str) -> Option<Session> {
         self.sessions.get(name).map(|s| s.value().clone())
     }
@@ -120,7 +131,7 @@ mod tests {
         server.register_session(s);
         assert!(server.find_session(&name).is_some());
 
-        let res = server.deregister_session(name.clone());
+        let res = server.deregister_session(name.as_str());
         assert!(res.is_ok());
         assert!(server.find_session(&name).is_none());
     }

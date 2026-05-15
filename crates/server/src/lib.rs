@@ -19,6 +19,17 @@ pub enum ControlMessage {
     SessionJoined { status: String },
 }
 
+/// Central run function for this relay server
+///
+/// # Arguments
+///
+/// * `listen_addr` - The address for the relay server to listen on
+///
+/// # Errors
+///
+/// * If the self-signed certificate creation fails
+/// * If the server config can't be built
+/// * If the endpoint can't be bound or started
 pub async fn run_relay(listen_addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
     let cert_der = cert.cert.der().clone();

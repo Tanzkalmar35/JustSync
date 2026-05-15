@@ -2,6 +2,17 @@ use std::path::Path;
 
 pub trait FsOps {
     fn scan_project_directory(&self, root: &str) -> Vec<(String, String)>;
+
+    /// Writes a list of project files to local disk
+    ///
+    /// # Arguments
+    ///
+    /// * `files` - The list of files to write to disk
+    ///
+    /// # Errors
+    ///
+    /// * If creating a directory fails
+    /// * If creating a file or writing content to one fails
     fn write_project_files(&self, files: Vec<(String, String)>) -> anyhow::Result<()>;
 }
 

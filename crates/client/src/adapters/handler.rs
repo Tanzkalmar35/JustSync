@@ -10,6 +10,7 @@ use std::path::Path;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
+#[must_use]
 pub struct StdioAdapter {
     reader: BufReader<tokio::io::Stdin>,
     stdout: tokio::io::Stdout,

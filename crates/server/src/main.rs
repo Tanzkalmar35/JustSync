@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install default crypto provider for rustls
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let endpoint = setup().await?;
+    let endpoint = setup()?;
     let server = Server::setup();
 
     // Handle incoming requests loop
@@ -36,10 +36,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(connection) => {
                     println!("New raw connection from: {}", connection.remote_address());
                     if let Err(e) = handle_connection(connection, &server_ref).await {
-                        eprintln!("Connection handler failed: {}", e);
+                        eprintln!("Connection handler failed: {e}");
                     }
                 }
-                Err(e) => eprintln!("Failed to establish QUIC connection: {}", e),
+                Err(e) => eprintln!("Failed to establish QUIC connection: {e}"),
             }
         });
     }
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn setup() -> Result<Endpoint, Box<dyn std::error::Error>> {
+fn setup() -> Result<Endpoint, Box<dyn std::error::Error>> {
     let server_config = if DEV_MODE {
         println!("DEV_MODE: Generating self-signed certificate for localhost...");
         generate_self_signed_config()?
@@ -62,7 +62,7 @@ async fn setup() -> Result<Endpoint, Box<dyn std::error::Error>> {
     // Bind the endpoint
     let listen_addr: SocketAddr = "0.0.0.0:5000".parse()?;
     let endpoint = Endpoint::server(server_config, listen_addr)?;
-    println!("Relay running on {}", listen_addr);
+    println!("Relay running on {listen_addr}");
     Ok(endpoint)
 }
 
@@ -95,20 +95,23 @@ fn generate_self_signed_config() -> Result<ServerConfig, Box<dyn std::error::Err
     // Print the token (hash of the certificate) so the client can use it for verification
     let hash = ring::digest::digest(&ring::digest::SHA256, cert_chain[0].as_ref());
     let token = hex::encode(hash.as_ref());
-    println!("--- DEV_MODE TOKEN: {} ---", token);
+    println!("--- DEV_MODE TOKEN: {token} ---");
     println!("Use this token in your client configuration to verify the self-signed certificate.");
 
     Ok(server_config)
 }
 
-/// [TODO:description]
+/// Loads TLS certificates from file
 ///
 /// # Arguments
 ///
-/// * `cert_path` - [TODO:description]
-/// * `key_path` - [TODO:description]
+/// * `cert_path` - The path to the certificate file
+/// * `key_path` - The path to the key file
 ///
 /// # Errors
+///
+/// * If `cert_path` points to no or an invalid file
+/// * If `key_path` points to no or an invalid file
 pub fn load_certs(
     cert_path: &Path,
     key_path: &Path,
@@ -117,9 +120,9 @@ pub fn load_certs(
 
     // Open the certificate and key files
     let cert_file = File::open(cert_path)
-        .map_err(|e| format!("Failed to open cert file at {:?}: {}", cert_path, e))?;
+        .map_err(|e| format!("Failed to open cert file at {}: {e}", cert_path.display()))?;
     let key_file = File::open(key_path)
-        .map_err(|e| format!("Failed to open key file at {:?}: {}", key_path, e))?;
+        .map_err(|e| format!("Failed to open key file at {}: {e}", key_path.display()))?;
 
     let mut cert_reader = BufReader::new(cert_file);
     let mut key_reader = BufReader::new(key_file);
@@ -128,7 +131,7 @@ pub fn load_certs(
     // rustls_pemfile::certs returns an iterator of Results, so we collect them into a Vec
     let certs = rustls_pemfile::certs(&mut cert_reader)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("Failed to parse certificates: {}", e))?;
+        .map_err(|e| format!("Failed to parse certificates: {e}"))?;
 
     if certs.is_empty() {
         return Err("No certificates found in the PEM file".into());
@@ -178,7 +181,7 @@ async fn handle_connection(
             let session = Session::new(Arc::new(connection.clone()), key);
             let session_name = session.name.clone();
 
-            println!("Host registering session: {}", session_name);
+            println!("Host registering session: {session_name}");
 
             server.register_session(session.clone());
 
@@ -193,7 +196,7 @@ async fn handle_connection(
             name: session_id,
             key,
         } => {
-            println!("Peer trying to join session: {}", session_id);
+            println!("Peer trying to join session: {session_id}");
 
             // Look up the Host's connection in the map
             if let Some(mut session) = server.find_session(&session_id) {
@@ -215,7 +218,7 @@ async fn handle_connection(
             send.shutdown().await.map_err(|e| e.to_string())?;
         }
         _ => {
-            eprintln!("Invalid controlmessage received")
+            eprintln!("Invalid controlmessage received");
         }
     }
 
