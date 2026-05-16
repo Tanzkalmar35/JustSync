@@ -25,7 +25,6 @@ use std::sync::Arc;
 
 /// Own special verifier for the peer
 #[derive(Debug)]
-#[must_use]
 pub struct TokenVerifier {
     expected_hash: Vec<u8>,
 }
@@ -40,6 +39,7 @@ impl TokenVerifier {
     /// # Panics
     ///
     /// * If the given `token_hex` isn't correctly hex-encoded. (So the decoding fails)
+    #[must_use]
     pub fn new(token_hex: &str) -> Arc<Self> {
         let bytes = hex::decode(token_hex).expect("Invalid token format, expected hash");
         Arc::new(Self {
