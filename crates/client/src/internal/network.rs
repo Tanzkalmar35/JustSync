@@ -5,12 +5,20 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::{
-    internal::{core::Event, crypto::TokenVerifier, lsp::Position},
+    internal::{core::Event, crypto::NoVerifier, lsp::Position},
     logger,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WireMessage {
+    Spake2MsgA {
+        data: Vec<u8>,
+    },
+
+    Spake2MsgB {
+        data: Vec<u8>,
+    },
+
     Patch {
         uri: String,
         data: Vec<u8>,
@@ -80,6 +88,12 @@ pub trait NetworkAdapter: Send {
 #[must_use]
 pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
     match cmd {
+        WireMessage::Spake2MsgA { data } => {
+            todo!()
+        },
+        WireMessage::Spake2MsgB { data } => {
+            todo!()
+        },
         WireMessage::Patch { uri, data } => {
             logger::log(&format!(">> [Network] Received patch for {uri}"));
             Event::RemotePatch { uri, patch: data }
@@ -141,9 +155,9 @@ pub fn make_transport_config() -> TransportConfig {
 ///
 /// * If the crypto config couldn't be applied to the `QuicClientConfig`
 #[must_use]
-pub fn configure_client(token: &str) -> ClientConfig {
+pub fn configure_client() -> ClientConfig {
     // Use own verifier
-    let verifier = TokenVerifier::new(token);
+    let verifier = Arc::new(NoVerifier{});
 
     let mut crypto = rustls::ClientConfig::builder()
         .dangerous()

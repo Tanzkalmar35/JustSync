@@ -1,7 +1,9 @@
 use anyhow::Result;
+use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
 use quinn::{Connection, RecvStream, SendStream};
 use serde::Serialize;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use spake2::{Ed25519Group, Identity, Password, Spake2};
+use std::{cmp::Ordering, collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::{
@@ -16,9 +18,14 @@ use crate::{
     logger,
 };
 
+struct PeerContext {
+    sender: quinn::SendStream,
+    secret: ChaCha20Poly1305,
+}
+
 pub struct QuicNetworkAdapter {
     session: SessionCfg,
-    peers: Arc<Mutex<HashMap<String, SendStream>>>,
+    peers: Arc<Mutex<HashMap<String, PeerContext>>>,
     core_send: mpsc::Sender<Event>,
     core_recv: Mutex<mpsc::Receiver<NetworkCommand>>,
 }
@@ -31,12 +38,11 @@ impl QuicNetworkAdapter {
     async fn connect(
         &self,
         relay_addr: SocketAddr,
-        token: &str,
     ) -> Result<quinn::Connection, Box<dyn std::error::Error>> {
         logger::log(&format!("Connecting to relay at {relay_addr}!"));
         // Setup connection
         let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
-        let cfg = configure_client(token);
+        let cfg = configure_client();
         endpoint.set_default_client_config(cfg);
 
         let conn = endpoint.connect(relay_addr, "relay")?.await?;
@@ -81,8 +87,7 @@ impl QuicNetworkAdapter {
             let mut core_recv = self.core_recv.lock().await;
             while let Some(cmd) = core_recv.recv().await {
                 let msg = into_external(cmd);
-                let mut p = self.peers.lock().await;
-                self.broadcast(&mut p, msg).await;
+                self.broadcast(msg).await;
             }
         });
 
@@ -100,7 +105,7 @@ impl QuicNetworkAdapter {
             agent_id: self.session.agent_id.clone(),
             is_host: self.is_host(),
         };
-        self.send_framed(&mut send, &init_msg)
+        self.send_framed(&mut send, &init_msg, None)
             .await
             .expect("Couldn't send verify message");
 
@@ -118,17 +123,28 @@ impl QuicNetworkAdapter {
                 ">> [Network] Connected to peer {remote_agent_id} (host: {remote_is_host})",
             ));
 
+            let peer = match self
+                .setup_peer_e2ee(&remote_agent_id, send, &mut recv)
+                .await
+            {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    logger::log(&format!("Failed to set up E2EE: {}", e));
+                    panic!("{e}");
+                }
+            };
+
             self.peers
                 .lock()
                 .await
-                .insert(remote_agent_id.clone(), send);
+                .insert(remote_agent_id.clone(), peer);
 
             // If we are a peer and we just connected to the host, request sync
             if !self.is_host() && remote_is_host {
-                logger::log(">> [Network] Requesting initial sync from host...");
+                logger::log("Requesting initial sync from host...");
                 let sync_req = WireMessage::RequestFullSync;
-                if let Some(host_send) = self.peers.lock().await.get_mut(&remote_agent_id) {
-                    self.send_framed(host_send, &sync_req)
+                if let Some(host_ctx) = self.peers.lock().await.get_mut(&remote_agent_id) {
+                    self.send_framed(&mut host_ctx.sender, &sync_req, Some(&host_ctx.secret))
                         .await
                         .expect("Failed to send sync request");
                 }
@@ -145,6 +161,94 @@ impl QuicNetworkAdapter {
         }
 
         Ok(())
+    }
+
+    /// Initializes E2EE between two peers.
+    ///
+    /// # Arguments
+    ///
+    /// * `remote_agent_id` - The agent_id of the remote peer
+    /// * `send` - Outgoing channel to the peer
+    /// * `recv` - Incoming channel from the peer
+    ///
+    /// # Panics
+    ///
+    /// * If the agent id's of the 2 peers are exactly equal, which is very highly unlikely, and if
+    ///   that happens, then this function failing is not the only problem we have
+    ///
+    /// # Errors
+    ///
+    /// * If Sending to the peer fails
+    /// * If recveiving from the peer fails
+    /// * If the process fails unexpectedly
+    async fn setup_peer_e2ee(
+        &self,
+        remote_agent_id: &str,
+        mut send: quinn::SendStream,
+        recv: &mut quinn::RecvStream,
+    ) -> Result<PeerContext, String> {
+        match self.session.agent_id.cmp(&remote_agent_id.to_string()) {
+            Ordering::Less => {
+                let (state, msg_a) = Spake2::<Ed25519Group>::start_a(
+                    &Password::new(self.session.key.clone()),
+                    &Identity::new(self.session.agent_id.as_bytes()),
+                    &Identity::new(remote_agent_id.as_bytes()),
+                );
+
+                let msg = WireMessage::Spake2MsgA { data: msg_a };
+
+                self.send_framed(&mut send, msg, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                if let WireMessage::Spake2MsgB { data } =
+                    self.recv_framed(recv).await.map_err(|e| e.to_string())?
+                {
+                    let secret = state.finish(&data).map_err(|e| e.to_string())?;
+                    let key = Key::from_slice(&secret);
+                    let cipher = ChaCha20Poly1305::new(key);
+
+                    return Ok(PeerContext {
+                        sender: send,
+                        secret: cipher,
+                    });
+                }
+            }
+            Ordering::Greater => {
+                let mut msg_a: Vec<u8> = vec![];
+                if let WireMessage::Spake2MsgA { data } =
+                    self.recv_framed(recv).await.map_err(|e| e.to_string())?
+                {
+                    msg_a = data;
+                }
+
+                let (state, msg_b) = Spake2::<Ed25519Group>::start_b(
+                    &Password::new(self.session.key.clone()),
+                    &Identity::new(remote_agent_id.as_bytes()),
+                    &Identity::new(self.session.agent_id.as_bytes()),
+                );
+
+                let msg = WireMessage::Spake2MsgA { data: msg_b };
+
+                self.send_framed(&mut send, msg, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let secret = state.finish(&msg_a).map_err(|e| e.to_string())?;
+                let key = Key::from_slice(&secret);
+                let cipher = ChaCha20Poly1305::new(key);
+
+                return Ok(PeerContext {
+                    sender: send,
+                    secret: cipher,
+                });
+            }
+            Ordering::Equal => {
+                panic!("Woah, we got matching agent_id's (uuids) - That's a first for me...")
+            }
+        }
+
+        Err(String::from("E2EE setup process failed!"))
     }
 
     async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream) {
@@ -242,16 +346,24 @@ impl QuicNetworkAdapter {
         Ok(serde_json::from_slice::<ControlMessage>(&buf[..n])?)
     }
 
-    async fn broadcast(&self, peers: &mut HashMap<String, quinn::SendStream>, msg: WireMessage) {
-        for (agent_id, send) in peers.iter_mut() {
+    async fn broadcast(&self, msg: WireMessage) {
+        for (agent_id, ctx) in self.peers.lock().await.iter_mut() {
             logger::log(&format!("Broadcasting to peer {agent_id}"));
-            if let Err(e) = self.send_framed(send, &msg).await {
+            if let Err(e) = self
+                .send_framed(&mut ctx.sender, &msg, Some(&ctx.secret))
+                .await
+            {
                 logger::log(&format!("!! [Network] Broadcast to {agent_id} failed: {e}"));
             }
         }
     }
 
-    async fn send_framed<T>(&self, send: &mut quinn::SendStream, msg: T) -> Result<()>
+    async fn send_framed<T>(
+        &self,
+        send: &mut quinn::SendStream,
+        msg: T,
+        _cipher: Option<&ChaCha20Poly1305>,
+    ) -> Result<()>
     where
         T: Sized + Serialize,
     {
@@ -299,8 +411,7 @@ impl NetworkAdapter for QuicNetworkAdapter {
             core_recv: Mutex::new(net_rx),
         };
 
-        // Pass empty token for now -> FIXME
-        let conn = match adapter.connect(session.relay_addr, "").await {
+        let conn = match adapter.connect(session.relay_addr).await {
             Ok(conn) => conn,
             Err(e) => panic!("{}", e),
         };
