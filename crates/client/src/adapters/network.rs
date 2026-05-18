@@ -200,14 +200,16 @@ impl QuicNetworkAdapter {
                     &Identity::new(remote_agent_id.as_bytes()),
                 );
 
-                let msg = WireMessage::Spake2MsgA { data: msg_a };
+                let msg = ControlMessage::Spake2MsgA { data: msg_a };
 
                 self.send_framed(&mut send, msg, None)
                     .await
                     .map_err(|e| e.to_string())?;
 
-                if let WireMessage::Spake2MsgB { data } =
-                    self.recv_framed(recv, None).await.map_err(|e| e.to_string())?
+                if let ControlMessage::Spake2MsgB { data } = self
+                    .recv_framed(recv, None)
+                    .await
+                    .map_err(|e| e.to_string())?
                 {
                     let secret = state.finish(&data).map_err(|e| e.to_string())?;
                     let key = Key::from_slice(&secret);
@@ -221,8 +223,10 @@ impl QuicNetworkAdapter {
             }
             Ordering::Greater => {
                 let mut msg_a: Vec<u8> = vec![];
-                if let WireMessage::Spake2MsgA { data } =
-                    self.recv_framed(recv, None).await.map_err(|e| e.to_string())?
+                if let ControlMessage::Spake2MsgA { data } = self
+                    .recv_framed(recv, None)
+                    .await
+                    .map_err(|e| e.to_string())?
                 {
                     msg_a = data;
                 }
@@ -233,7 +237,7 @@ impl QuicNetworkAdapter {
                     &Identity::new(self.session.agent_id.as_bytes()),
                 );
 
-                let msg = WireMessage::Spake2MsgA { data: msg_b };
+                let msg = ControlMessage::Spake2MsgB { data: msg_b };
 
                 self.send_framed(&mut send, msg, None)
                     .await
@@ -376,11 +380,16 @@ impl QuicNetworkAdapter {
 
         if let Some(c) = cipher {
             let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
-            match &c.encrypt(&nonce, bytes.as_ref()) {
-                Ok(blob) => bytes = blob.to_vec(),
+            match c.encrypt(&nonce, bytes.as_ref()) {
+                Ok(blob) => {
+                    // Prepend the 12-byte nonce to the ciphertext
+                    let mut payload = nonce.to_vec();
+                    payload.extend_from_slice(&blob);
+                    bytes = payload;
+                }
                 Err(e) => {
                     logger::log(&format!("An error occured while encrypting msg: {e:?}"));
-                    // TODO: Return err
+                    return Err(anyhow::anyhow!("Encryption failed"));
                 }
             }
         }
@@ -412,22 +421,30 @@ impl QuicNetworkAdapter {
 
         let mut buf = vec![0u8; len];
         recv.read_exact(&mut buf).await?;
-        let mut msg = serde_json::from_slice::<T>(&buf)?;
 
         if let Some(c) = cipher {
-            let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
-            match &c.decrypt(&nonce, buf.as_ref()) {
-                Ok(text) => msg = serde_json::from_slice::<T>(&text)?,
+            // ChaCha20Poly1305 nonce is exactly 12 bytes
+            if buf.len() < 12 {
+                return Err(anyhow::anyhow!(
+                    "Encrypted payload too small to contain nonce"
+                ));
+            }
+
+            // Split the buffer into nonce and ciphertext
+            let nonce = chacha20poly1305::Nonce::clone_from_slice(&buf[..12]);
+            match c.decrypt(&nonce, &buf[12..]) {
+                Ok(text) => Ok(serde_json::from_slice::<T>(&text)?),
                 Err(e) => {
                     logger::log(&format!(
                         "An error occured while decrypting incoming msg: {e:?}"
                     ));
-                    // TODO: Return err
+                    Err(anyhow::anyhow!("Decryption failed"))
                 }
             }
+        } else {
+            // Unencrypted traffic (e.g., initial SPAKE2 handshake)
+            Ok(serde_json::from_slice::<T>(&buf)?)
         }
-
-        Ok(msg)
     }
 }
 

@@ -1,5 +1,12 @@
+use ring::digest::{SHA256, digest};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
+
+#[must_use]
+pub fn hash(key: &str) -> String {
+    let hash = digest(&SHA256, key.as_bytes());
+    hex::encode(hash.as_ref())
+}
 
 /// As this architecture works on zero trust using E2EE and SPAKE2, there's no need to verify any
 /// certs. Therefore we just accept all traffic without checking, because it's all just encrypted
@@ -39,6 +46,8 @@ impl ServerCertVerifier for NoVerifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        todo!()
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }

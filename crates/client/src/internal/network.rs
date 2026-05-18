@@ -11,14 +11,6 @@ use crate::{
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WireMessage {
-    Spake2MsgA {
-        data: Vec<u8>,
-    },
-
-    Spake2MsgB {
-        data: Vec<u8>,
-    },
-
     Patch {
         uri: String,
         data: Vec<u8>,
@@ -60,6 +52,8 @@ pub enum ControlMessage {
     Join { name: String, key: String },
     SessionJoined { status: String },
     InitPeer { agent_id: String, is_host: bool },
+    Spake2MsgA { data: Vec<u8> },
+    Spake2MsgB { data: Vec<u8> },
 }
 
 #[derive(Clone)]
@@ -88,12 +82,6 @@ pub trait NetworkAdapter: Send {
 #[must_use]
 pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
     match cmd {
-        WireMessage::Spake2MsgA { data } => {
-            todo!()
-        },
-        WireMessage::Spake2MsgB { data } => {
-            todo!()
-        },
         WireMessage::Patch { uri, data } => {
             logger::log(&format!(">> [Network] Received patch for {uri}"));
             Event::RemotePatch { uri, patch: data }
@@ -146,7 +134,7 @@ pub fn make_transport_config() -> TransportConfig {
 }
 
 /// Configures client's network security options
-/// 
+///
 /// # Arguments
 ///
 /// * `token` - The TLS token
@@ -157,7 +145,7 @@ pub fn make_transport_config() -> TransportConfig {
 #[must_use]
 pub fn configure_client() -> ClientConfig {
     // Use own verifier
-    let verifier = Arc::new(NoVerifier{});
+    let verifier = Arc::new(NoVerifier {});
 
     let mut crypto = rustls::ClientConfig::builder()
         .dangerous()
