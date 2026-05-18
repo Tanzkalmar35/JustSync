@@ -1,5 +1,8 @@
 use anyhow::Result;
-use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
+use chacha20poly1305::{
+    AeadCore, ChaCha20Poly1305, Key, KeyInit,
+    aead::{Aead, OsRng},
+};
 use quinn::{Connection, RecvStream, SendStream};
 use serde::Serialize;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
@@ -110,7 +113,7 @@ impl QuicNetworkAdapter {
             .expect("Couldn't send verify message");
 
         let msg: ControlMessage = self
-            .recv_framed(&mut recv)
+            .recv_framed(&mut recv, None)
             .await
             .expect("Unable to deserialize incoming message");
 
@@ -134,6 +137,8 @@ impl QuicNetworkAdapter {
                 }
             };
 
+            let peer_secret = peer.secret.clone();
+
             self.peers
                 .lock()
                 .await
@@ -154,7 +159,7 @@ impl QuicNetworkAdapter {
 
             // Run receiving map for each peer in a separate thread
             tokio::spawn(async move {
-                self_recv.recv_loop(recv).await;
+                self_recv.recv_loop(recv, &peer_secret).await;
             });
         } else {
             panic!("Invalid setup msg received, expected Init, got {msg:?}");
@@ -202,7 +207,7 @@ impl QuicNetworkAdapter {
                     .map_err(|e| e.to_string())?;
 
                 if let WireMessage::Spake2MsgB { data } =
-                    self.recv_framed(recv).await.map_err(|e| e.to_string())?
+                    self.recv_framed(recv, None).await.map_err(|e| e.to_string())?
                 {
                     let secret = state.finish(&data).map_err(|e| e.to_string())?;
                     let key = Key::from_slice(&secret);
@@ -217,7 +222,7 @@ impl QuicNetworkAdapter {
             Ordering::Greater => {
                 let mut msg_a: Vec<u8> = vec![];
                 if let WireMessage::Spake2MsgA { data } =
-                    self.recv_framed(recv).await.map_err(|e| e.to_string())?
+                    self.recv_framed(recv, None).await.map_err(|e| e.to_string())?
                 {
                     msg_a = data;
                 }
@@ -251,9 +256,9 @@ impl QuicNetworkAdapter {
         Err(String::from("E2EE setup process failed!"))
     }
 
-    async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream) {
+    async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream, cipher: &ChaCha20Poly1305) {
         loop {
-            match self.recv_framed(&mut recv).await {
+            match self.recv_framed(&mut recv, Some(cipher)).await {
                 Ok(wire_msg) => {
                     let event = into_internal(wire_msg, self.is_host());
                     match self.core_send.send(event.clone()).await {
@@ -362,12 +367,24 @@ impl QuicNetworkAdapter {
         &self,
         send: &mut quinn::SendStream,
         msg: T,
-        _cipher: Option<&ChaCha20Poly1305>,
+        cipher: Option<&ChaCha20Poly1305>,
     ) -> Result<()>
     where
         T: Sized + Serialize,
     {
-        let bytes = serde_json::to_vec(&msg)?;
+        let mut bytes = serde_json::to_vec(&msg)?;
+
+        if let Some(c) = cipher {
+            let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
+            match &c.encrypt(&nonce, bytes.as_ref()) {
+                Ok(blob) => bytes = blob.to_vec(),
+                Err(e) => {
+                    logger::log(&format!("An error occured while encrypting msg: {e:?}"));
+                    // TODO: Return err
+                }
+            }
+        }
+
         let len = u32::try_from(bytes.len())?;
 
         send.write_all(&len.to_be_bytes()).await?;
@@ -375,7 +392,11 @@ impl QuicNetworkAdapter {
         Ok(())
     }
 
-    async fn recv_framed<T>(&self, recv: &mut quinn::RecvStream) -> Result<T>
+    async fn recv_framed<T>(
+        &self,
+        recv: &mut quinn::RecvStream,
+        cipher: Option<&ChaCha20Poly1305>,
+    ) -> Result<T>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -386,13 +407,26 @@ impl QuicNetworkAdapter {
         if len > 100 * 1024 * 1024 {
             return Err(anyhow::anyhow!("Message too large (100MB limit)"));
         } else if len == 0 {
-            return Box::pin(self.recv_framed(recv)).await;
+            return Box::pin(self.recv_framed(recv, cipher)).await;
         }
 
         let mut buf = vec![0u8; len];
         recv.read_exact(&mut buf).await?;
+        let mut msg = serde_json::from_slice::<T>(&buf)?;
 
-        let msg = serde_json::from_slice::<T>(&buf)?;
+        if let Some(c) = cipher {
+            let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
+            match &c.decrypt(&nonce, buf.as_ref()) {
+                Ok(text) => msg = serde_json::from_slice::<T>(&text)?,
+                Err(e) => {
+                    logger::log(&format!(
+                        "An error occured while decrypting incoming msg: {e:?}"
+                    ));
+                    // TODO: Return err
+                }
+            }
+        }
+
         Ok(msg)
     }
 }
