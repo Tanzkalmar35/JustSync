@@ -91,7 +91,7 @@ local function launch_client(args, mode_name)
     for _, arg in ipairs(args) do table.insert(cmd, arg) end
 
     local client_id = vim.lsp.start({
-        name = "justsync",
+        name = "just_sync",
         cmd = cmd,
         root_dir = root_dir,
         capabilities = capabilities,
