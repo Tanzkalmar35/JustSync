@@ -13,7 +13,6 @@ on:
           - minor
           - major
 
-# Allows the github bot to write to the project
 permissions:
   contents: write
 
@@ -39,10 +38,8 @@ jobs:
         working-directory: ./extensions/vscode
 
       - name: Bump Version and Publish to Marketplace
-        # Nutzt den Input aus dem Dropdown (patch, minor, major)
         run: npx @vscode/vsce publish ${{ inputs.versionType }} -p ${{ secrets.VSCE_PAT }}
         working-directory: ./extensions/vscode
 
       - name: Push changes and tags back to repo
-        # vsce erstellt automatisch einen Commit und Tag. Diese pushen wir jetzt.
         run: git push origin HEAD:${{ github.ref }} --tags
