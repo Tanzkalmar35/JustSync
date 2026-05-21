@@ -1,13 +1,33 @@
-use std::sync::Arc;
-use std::{net::SocketAddr, path::Path};
-
+use clap::Parser;
 use quinn::{Connection, Endpoint, ServerConfig, VarInt};
 use serde::{Deserialize, Serialize};
 use server::server::Server;
 use server::session::Session;
 use std::fs::File;
 use std::io::BufReader;
+use std::sync::Arc;
+use std::{net::SocketAddr, path::Path};
 use tokio::io::AsyncWriteExt;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct ServerArgs {
+    /// Port to listen on
+    #[arg(short, long, default_value_t = 5000)]
+    port: u16,
+
+    /// Run in development mode (generates self-signed certs)
+    #[arg(long, default_value_t = false)]
+    dev: bool,
+
+    /// Path to the TLS certificate fullchain.pem (Required if not in --dev mode)
+    #[arg(long)]
+    cert: Option<String>,
+
+    /// Path to the TLS private key privkey.pem (Required if not in --dev mode)
+    #[arg(long)]
+    key: Option<String>,
+}
 
 #[derive(Deserialize, Serialize, Debug)]
 pub enum ControlMessage {
@@ -17,14 +37,14 @@ pub enum ControlMessage {
     SessionJoined { status: String },
 }
 
-const DEV_MODE: bool = true;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install default crypto provider for rustls
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let endpoint = setup()?;
+    let args = ServerArgs::parse();
+
+    let endpoint = setup(&args)?;
     let server = Server::setup();
 
     // Handle incoming requests loop
@@ -47,20 +67,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn setup() -> Result<Endpoint, Box<dyn std::error::Error>> {
-    let server_config = if DEV_MODE {
+fn setup(args: &ServerArgs) -> Result<Endpoint, Box<dyn std::error::Error>> {
+    let server_config = if args.dev {
         println!("DEV_MODE: Generating self-signed certificate for localhost...");
         generate_self_signed_config()?
     } else {
-        // Load Let's Encrypt Certs
-        // Make sure these paths match what Certbot outputs on the server
-        let cert_path = Path::new("/etc/letsencrypt/live/relay.yourdomain.com/fullchain.pem");
-        let key_path = Path::new("/etc/letsencrypt/live/relay.yourdomain.com/privkey.pem");
+        let cert_path_str = args
+            .cert
+            .as_ref()
+            .ok_or("Missing --cert path. Use --dev for self-signed certs.")?;
+        let key_path_str = args
+            .key
+            .as_ref()
+            .ok_or("Missing --key path. Use --dev for self-signed certs.")?;
+
+        let cert_path = Path::new(cert_path_str);
+        let key_path = Path::new(key_path_str);
         load_certs(cert_path, key_path)?
     };
 
     // Bind the endpoint
-    let listen_addr: SocketAddr = "0.0.0.0:5000".parse()?;
+    let listen_addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse()?;
     let endpoint = Endpoint::server(server_config, listen_addr)?;
     println!("Relay running on {listen_addr}");
     Ok(endpoint)
