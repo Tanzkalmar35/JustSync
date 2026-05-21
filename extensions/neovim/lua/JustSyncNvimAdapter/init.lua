@@ -1,7 +1,7 @@
 local M = {}
 
 M.config = {
-    cmd_path = "justsync",
+    cmd_path = "just_sync",
     log_level = vim.log.levels.INFO,
 }
 

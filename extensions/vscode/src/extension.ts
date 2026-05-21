@@ -10,7 +10,7 @@ let client: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem;
 
 // Point this to your global binary or absolute path
-const SERVER_PATH = "JustSync";
+const SERVER_PATH = "just_sync";
 
 export function activate(context: vscode.ExtensionContext) {
     console.log(">> JustSync Extension Active");

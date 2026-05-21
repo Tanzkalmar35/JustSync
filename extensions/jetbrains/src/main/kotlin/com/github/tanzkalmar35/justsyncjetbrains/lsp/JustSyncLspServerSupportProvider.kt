@@ -38,8 +38,7 @@ class JustSyncLspDescriptor(project: Project, private val args: List<String>) : 
 
     override fun createCommandLine(): GeneralCommandLine {
         return GeneralCommandLine().apply {
-            // Annahme: "justsync" ist im PATH
-            exePath = "/home/fabian/Desktop/git/JustSync/target/release/JustSync"
+            exePath = "just_sync"
             addParameters(args)
             setWorkDirectory(project.basePath)
         }
