@@ -166,4 +166,4 @@ After that, the host has to find out it's public ip address, so that the peer ca
 *   **Neovim:** Run `:JustSyncJoin`, then follow the prompts to enter the IP and Token.
 
 ## 📄 License
-This project is licensed under the MIT License.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3).
