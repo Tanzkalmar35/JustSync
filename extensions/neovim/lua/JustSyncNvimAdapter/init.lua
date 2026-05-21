@@ -142,10 +142,8 @@ local function launch_client(args, mode_name)
                         textDocument = { uri = vim.uri_from_bufnr(bufnr) },
                         position = { line = line, character = char }
                     }
-                    -- Use Colon operator (Client:notify) for 0.12+ compatibility
-                    if client.notify then
-                        client.rpc.notify('$/justsync/cursor', params)
-                    end
+
+                    client.rpc.notify('$/justsync/cursor', params)
                 end
             })
         end,
@@ -157,7 +155,7 @@ local function launch_client(args, mode_name)
             group = grp,
             pattern = "*",
             callback = function(ev)
-                local clients = vim.lsp.get_clients({ name = "justsync" })
+                local clients = vim.lsp.get_clients({ name = "just_sync" })
                 if #clients > 0 then
                     vim.lsp.buf_attach_client(ev.buf, clients[1].id)
                 end
