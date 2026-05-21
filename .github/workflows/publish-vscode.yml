@@ -1,0 +1,48 @@
+name: Release VS Code Extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      versionType:
+        description: 'Select type of release'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+# Allows the github bot to write to the project
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Configure Git for Bot
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Dependencies
+        run: npm ci
+        working-directory: ./extensions/vscode
+
+      - name: Bump Version and Publish to Marketplace
+        # Nutzt den Input aus dem Dropdown (patch, minor, major)
+        run: npx @vscode/vsce publish ${{ inputs.versionType }} -p ${{ secrets.VSCE_PAT }}
+        working-directory: ./extensions/vscode
+
+      - name: Push changes and tags back to repo
+        # vsce erstellt automatisch einen Commit und Tag. Diese pushen wir jetzt.
+        run: git push origin HEAD:${{ github.ref }} --tags
