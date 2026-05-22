@@ -2,7 +2,7 @@
 
 [![Status](https://img.shields.io/badge/Status-Alpha%20v0.1.0-orange)]()
 [![Language](https://img.shields.io/badge/Language-Rust-red)]()
-[![License](https://img.shields.io/badge/License-MIT-blue)]()
+[![License](https://img.shields.io/badge/License-AGPLv3-blue)](LICENSE)
 
 **JustSync** is a high-performance, real-time code synchronization tool designed for Neovim and LSP-compliant editors.
 
@@ -111,49 +111,94 @@ One of the hardest problems in LSP synchronization is the "Echo Loop," where the
 
 ## 📦 Installation
 
-Be warned, the installation, especially for the host, is quite tedious. I'll try my best to make this easier in the future.
+The installation is a 3-part process
 
-### Prerequisites
+### Part 1: Obtaining the binary
 
-- Rust Toolchain (latest stable)
-- Neovim (v0.8+)
+In order to use JustSync, the just_sync binary must be globally accessible on each peer's system.
 
-### Build from Source
+#### Obtaining the binary
+
+To obtain the binary itself, currently there are 2 options:
+
+**Obtain from release**
+
+Under the [releases page](https://github.com/Tanzkalmar35/JustSync/releases) you can find pre-built binaries. From there, 
+you can just download the newest binary.
+
+**Build from Source**
 
 ```Bash
-git clone https://github.com/Tanzkalmar35/justsync
-cd justsync
-cargo install --path crates/client
+git clone https://github.com/Tanzkalmar35/JustSync
+cd JustSync
+cargo build --release
 ```
 
-This will install the `just_sync` binary to your cargo bin directory (usually `~/.cargo/bin`), which should be in your PATH.
+This will build the application with release optimizations, and place the binary under `/path/to/JustSync/target/release/just_sync`.
 
-### Additional setup
+#### Making the binary functional
 
-The host has to make port 5000 publicly accessible (the relay server's default port). I personally have tested it only with port forwarding.
+Now that you have the binary, next step is to make it globally accessible and usable.
 
-## 💻 Usage
+* Linux
 
-JustSync is designed to be used directly through your editor of choice via one of the dedicated extensions.
+```Bash
+sudo chmod +x /path/to/binary
+sudo cp /path/to/binary /usr/local/bin
+```
 
-### Supported Editors
+* Windows
+
+1. Create a folder for your binaries if you don't have one (e.g., `C:\bin`).
+2. Move `just_sync.exe` into that folder.
+3. Add that folder to your **User PATH**:
+   * Search for "Edit the system environment variables" in the Start menu.
+   * Click **Environment Variables**.
+   * Under **User variables**, select `Path` and click **Edit**.
+   * Click **New** and paste the path to your folder (e.g., `C:\bin`).
+   * Restart your terminal.
+
+* MacOS
+
+```Bash
+# 1. Make the binary executable
+chmod +x /path/to/binary
+
+# 2. Move it to a folder in your PATH
+sudo cp /path/to/binary /usr/local/bin
+```
+
+> **Note for MacOS:** If you downloaded the binary from GitHub Releases, you might need to allow it in **System Settings > Privacy & Security** if the OS blocks it as "unverified".
+
+### Step 2: The editor extension
+
+Each peer must install the JustSync extension in the editor of their choice. Currently supported extensions are:
+
 *   **Neovim:** [../../extensions/neovim](../../extensions/neovim)
 *   **VS Code:** [../../extensions/vscode](../../extensions/vscode)
 *   **IntelliJ IDEA:** [../../extensions/jetbrains](../../extensions/jetbrains)
 
-### How to Connect
+You can find directions on installing each one by following the respective link.
 
-**1. Start the Session (Host)**
-*   **VS Code / IntelliJ:** Click the **Start** button in the extension panel, select **Host**, and copy the generated **Secret Token**.
-*   **Neovim:** Run the command `:JustSyncStart`. The token will be displayed in the messages area.
+### Step 3: The relay server
 
-After that, the host has to find out it's public ip address, so that the peer can enter that.
+In order to give each peer the ability to work in a network without the hosting peer needing to port forward, 
+I introduced a simple relay server. All this relay server does it hotwire each peer to each other peer.
 
-**2. Join a Session (Peer)**
-> **⚠️ Important:** Peers must start in an **empty directory**. The initial sync will download the project state from the host.
+You can either use a public relay server, if available, or self-host a relay server. These relay servers are truly zero-knowledge. 
+As all the sensitive communication (all communication after the setup) is protected by E2EE by each peer, you're safe to use
+public relay servers, again, if any are available. For the current scope none will be available, but if I get to know some, I'll list them here.
 
-*   **VS Code / IntelliJ:** Click **Start**, select **Join**, enter the Host's **IP Address**, and paste the **Secret Token**.
-*   **Neovim:** Run `:JustSyncJoin`, then follow the prompts to enter the IP and Token.
+If you want to self-host the relay server however, please follow [the according instructions](https://github.com/Tanzkalmar35/JustSync/tree/master/crates/server).
+
+## 💻 Usage
+
+Using JustSync after having it set up is pretty straight forward, you just interact with the editor extension. 
+Exactly how each editor extension works you can find out by following the respective links.
+
+*   **Neovim:** [../../extensions/neovim](../../extensions/neovim)
+*   **VS Code:** [../../extensions/vscode](../../extensions/vscode)
+*   **IntelliJ IDEA:** [../../extensions/jetbrains](../../extensions/jetbrains)
 
 ## 📄 License
 This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3).
