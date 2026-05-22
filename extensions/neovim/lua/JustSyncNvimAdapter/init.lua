@@ -2,7 +2,7 @@ local M = {}
 
 M.config = {
     cmd_path = "just_sync",
-    log_level = vim.log.levels.DEBUG,
+    log_level = vim.log.levels.INFO,
 }
 
 M.autocmd_registered = false
@@ -166,7 +166,7 @@ function M.join()
                     return
                 end
 
-                launch_client({ "--mode", "peer", "--remote-ip", ip, "--session-name", name, "--key", pw }, "Host")
+                launch_client({ "--mode", "peer", "--remote-ip", ip, "--session-name", name, "--key", pw }, "Peer")
             end)
         end)
     end)
