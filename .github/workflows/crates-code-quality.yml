@@ -1,0 +1,123 @@
+name: Rust crates code quality checks
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Run nightly jobs at 02:00 UTC every day
+    - cron: "0 2 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0       # Disable incremental compilation in CI (cleaner caches)
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Formatting ─────────────────────────────────────────────────────────────
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  # ── Linting ────────────────────────────────────────────────────────────────
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # ── Security & license checks ──────────────────────────────────────────────
+  # deny:
+  #  name: Deny (audit + licenses)
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #    - uses: actions/checkout@v4
+
+  #    - name: Install cargo-deny
+  #      uses: EmbarkStudios/cargo-deny-action@v2
+
+  # ── Tests ──────────────────────────────────────────────────────────────────
+  test:
+    name: Test / ${{ matrix.os }} / ${{ matrix.toolchain }}
+    needs: [ fmt, clippy ]   # Don't spin up the matrix if basic checks fail
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        toolchain: [ stable, beta ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ${{ matrix.toolchain }} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.toolchain }}
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Run tests (default features)
+        run: cargo test
+
+      - name: Run tests (all features)
+        run: cargo test --all-features
+
+      - name: Run tests (no default features)
+        run: cargo test --no-default-features
+
+      - name: Run doc tests
+        run: cargo test --doc --all-features
+
+  # ── Miri (nightly, scheduled only) ────────────────────────────────────────
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly toolchain with Miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: miri
+
+      - name: Run Miri
+        env:
+          MIRIFLAGS: "-Zmiri-strict-provenance"
+        run: cargo miri test --all-features
