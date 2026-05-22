@@ -1,4 +1,5 @@
 use clap::{Arg, Command};
+use tracing::{error, info};
 use std::process::exit;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -25,8 +26,8 @@ pub async fn main() {
     let ctx = parse_cmd();
     let is_host = ctx.mode == "host";
 
-    logger::init(&ctx.mode);
-    logger::log(&format!("Starting JustSync in {} mode", ctx.mode));
+    let _log_guard = logger::init(&ctx.mode);
+    info!("Starting JustSync in {} mode", ctx.mode);
 
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
     let (net_out_tx, net_out_rx) = mpsc::channel::<NetworkCommand>(100);
@@ -57,7 +58,7 @@ pub async fn main() {
     // Host: Scan files
     let fs = FileSystem {};
     if is_host {
-        logger::log(">> [Host] Scanning workspace files...");
+        info!(">> Scanning workspace files...");
         let files = fs.scan_project_directory(".");
         for (uri, content) in files {
             let _ = core_tx.send(Event::LoadFromDisk { uri, content }).await;
@@ -74,7 +75,7 @@ pub async fn main() {
 }
 
 fn parse_cmd() -> Context {
-    let matches = Command::new("JustSync")
+    let matches = Command::new("just_sync")
         .version("1.0")
         .about("A real-time, editor agnostic collaboration engine")
         .arg(
@@ -121,7 +122,7 @@ fn parse_cmd() -> Context {
         .expect("Expected session key");
 
     if mode != "host" && mode != "peer" {
-        eprintln!("Invalid mode. Use --mode host or --mode peer.");
+        error!("Invalid mode. Use --mode host or --mode peer.");
         exit(1);
     }
 

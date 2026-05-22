@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LspHeader {
     pub jsonrpc: String,
     pub method: Option<String>,
@@ -11,77 +12,84 @@ pub struct LspHeader {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DidOpenParams {
-    #[serde(rename = "textDocument")]
     pub text_document: TextDocumentItem,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextDocumentItem {
     pub uri: String,
     pub text: String,
+    pub version: i32,
+    pub language_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DidChangeParams {
-    #[serde(rename = "textDocument")]
     pub text_document: VersionedTextDocumentIdentifier,
-    #[serde(rename = "contentChanges")]
     pub content_changes: Vec<TextDocumentContentChangeEvent>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DidCloseParams {
-    #[serde(rename = "textDocument")]
     pub text_document: TextDocumentIdentifier,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextDocumentIdentifier {
     pub uri: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VersionedTextDocumentIdentifier {
     pub uri: String,
     pub version: i32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextDocumentContentChangeEvent {
     pub range: Option<Range>,
     pub text: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Range {
     pub start: Position,
     pub end: Position,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Position {
     pub line: usize,
     pub character: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TextEdit {
     pub range: Range,
-    #[serde(rename = "newText")]
     pub new_text: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CursorPositionParams {
-    #[serde(rename = "textDocument")]
     pub text_document: TextDocumentIdentifier,
     pub position: Position,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeParams {
-    #[serde(rename = "rootUri")]
     pub root_uri: Option<String>,
 }
 

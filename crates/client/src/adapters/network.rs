@@ -8,6 +8,7 @@ use serde::Serialize;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use std::{cmp::Ordering, collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
+use tracing::{debug, error, info};
 
 use crate::{
     internal::{
@@ -18,7 +19,6 @@ use crate::{
             configure_client, into_external, into_internal,
         },
     },
-    logger,
 };
 
 struct PeerContext {
@@ -42,14 +42,14 @@ impl QuicNetworkAdapter {
         &self,
         relay_addr: SocketAddr,
     ) -> Result<quinn::Connection, Box<dyn std::error::Error>> {
-        logger::log(&format!("Connecting to relay at {relay_addr}!"));
+        info!("[Net] Connecting to relay at {}", relay_addr);
         // Setup connection
         let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse()?)?;
         let cfg = configure_client();
         endpoint.set_default_client_config(cfg);
 
         let conn = endpoint.connect(relay_addr, "relay")?.await?;
-        logger::log("Connected to relay.");
+        info!("[Net] Connected to relay server.");
         Ok(conn)
     }
 
@@ -67,11 +67,14 @@ impl QuicNetworkAdapter {
                     Ok((send, recv)) => {
                         let self_accept = Arc::clone(&self_accept);
                         if let Err(e) = self_accept.accept_peer(send, recv).await {
-                            logger::log(&format!("!! [Network] accept_peer failed: {e}"));
+                            error!("[Net] An error occured while accepting new peer: {}", e);
                         }
                     }
                     Err(e) => {
-                        logger::log(&format!("!! [Network] accept_bi failed: {e}"));
+                        error!(
+                            "[Net] Establishing a new incoming stream from relay failed: {}",
+                            e
+                        );
                         break;
                     }
                 }
@@ -122,9 +125,7 @@ impl QuicNetworkAdapter {
             is_host: remote_is_host,
         } = msg
         {
-            logger::log(&format!(
-                ">> [Network] Connected to peer {remote_agent_id} (host: {remote_is_host})",
-            ));
+            info!("[Net] Connected to peer {}", remote_agent_id);
 
             let peer = match self
                 .setup_peer_e2ee(&remote_agent_id, send, &mut recv)
@@ -132,7 +133,7 @@ impl QuicNetworkAdapter {
             {
                 Ok(ctx) => ctx,
                 Err(e) => {
-                    logger::log(&format!("Failed to set up E2EE: {}", e));
+                    error!("[Net] Failed to initialize E2EE with new peer: {}", e);
                     panic!("{e}");
                 }
             };
@@ -146,7 +147,7 @@ impl QuicNetworkAdapter {
 
             // If we are a peer and we just connected to the host, request sync
             if !self.is_host() && remote_is_host {
-                logger::log("Requesting initial sync from host...");
+                info!("[Net] Requesting initial sync from host");
                 let sync_req = WireMessage::RequestFullSync;
                 if let Some(host_ctx) = self.peers.lock().await.get_mut(&remote_agent_id) {
                     self.send_framed(&mut host_ctx.sender, &sync_req, Some(&host_ctx.secret))
@@ -172,7 +173,7 @@ impl QuicNetworkAdapter {
     ///
     /// # Arguments
     ///
-    /// * `remote_agent_id` - The agent_id of the remote peer
+    /// * `remote_agent_id` - The agent id of the remote peer
     /// * `send` - Outgoing channel to the peer
     /// * `recv` - Incoming channel from the peer
     ///
@@ -266,14 +267,15 @@ impl QuicNetworkAdapter {
                 Ok(wire_msg) => {
                     let event = into_internal(wire_msg, self.is_host());
                     match self.core_send.send(event.clone()).await {
-                        Ok(()) => logger::log("Sent patch to core!"),
-                        Err(e) => logger::log(&format!("Couldn't send patch to remote: {e}")),
+                        Ok(()) => debug!("[Net] Populated patch to editor"),
+                        Err(e) => error!(
+                            "[Net] An error occured populating incoming event to core: {}",
+                            e
+                        ),
                     }
                 }
                 Err(e) => {
-                    crate::logger::log(&format!(
-                        "!! [Network] Read error (connection closed): {e}"
-                    ));
+                    error!("[Net] An error occured reading incoming message: {}", e);
                     break;
                 }
             }
@@ -285,7 +287,7 @@ impl QuicNetworkAdapter {
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
     ) -> anyhow::Result<()> {
-        logger::log("Registering new session on relay...");
+        debug!("[Net] Registering new session on relay");
         let msg = ControlMessage::Register {
             key: self.session.key.clone(),
         };
@@ -294,7 +296,10 @@ impl QuicNetworkAdapter {
 
         if let ControlMessage::SessionCreated { status, name } = response {
             if status.eq("ok") {
-                logger::log(&format!("Created session - name: {name}"));
+                info!(
+                    "[Net] Registered new session on relay server: name: {}",
+                    name
+                );
                 let _ = self.core_send.send(Event::SessionRegistered { name }).await;
             } else {
                 return Err(anyhow::Error::msg(
@@ -316,7 +321,7 @@ impl QuicNetworkAdapter {
         recv: &mut quinn::RecvStream,
         session_name: String,
     ) -> anyhow::Result<()> {
-        logger::log(&format!("Joining session {session_name}!"));
+        debug!("[Net] Attempting to join session {}", session_name);
         let msg = ControlMessage::Join {
             name: session_name,
             key: self.session.key.clone(),
@@ -330,7 +335,7 @@ impl QuicNetworkAdapter {
                     "Unable to init session on relay server!",
                 ));
             }
-            logger::log("Successfully joined session.");
+            info!("[Net] Successfully joined session");
         } else {
             return Err(anyhow::Error::msg(
                 "Invalid relay server response, check relay server logs for more information!",
@@ -357,12 +362,12 @@ impl QuicNetworkAdapter {
 
     async fn broadcast(&self, msg: WireMessage) {
         for (agent_id, ctx) in self.peers.lock().await.iter_mut() {
-            logger::log(&format!("Broadcasting to peer {agent_id}"));
+            debug!("[Net] Broadcasting patch to {}", agent_id);
             if let Err(e) = self
                 .send_framed(&mut ctx.sender, &msg, Some(&ctx.secret))
                 .await
             {
-                logger::log(&format!("!! [Network] Broadcast to {agent_id} failed: {e}"));
+                error!("[Net] Broadcast to {} failed: {}", agent_id, e);
             }
         }
     }
@@ -388,7 +393,10 @@ impl QuicNetworkAdapter {
                     bytes = payload;
                 }
                 Err(e) => {
-                    logger::log(&format!("An error occured while encrypting msg: {e:?}"));
+                    error!(
+                        "[Net] An error occured while encrypting outgoing message: {:?}",
+                        e
+                    );
                     return Err(anyhow::anyhow!("Encryption failed"));
                 }
             }
@@ -435,9 +443,10 @@ impl QuicNetworkAdapter {
             match c.decrypt(&nonce, &buf[12..]) {
                 Ok(text) => Ok(serde_json::from_slice::<T>(&text)?),
                 Err(e) => {
-                    logger::log(&format!(
-                        "An error occured while decrypting incoming msg: {e:?}"
-                    ));
+                    error!(
+                        "[Net] An error occured decrypting incoming message: {:?}",
+                        e
+                    );
                     Err(anyhow::anyhow!("Decryption failed"))
                 }
             }

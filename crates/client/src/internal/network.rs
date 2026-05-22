@@ -3,10 +3,10 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use quinn::{ClientConfig, TransportConfig, VarInt, crypto::rustls::QuicClientConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+use tracing::debug;
 
 use crate::{
     internal::{core::Event, crypto::NoVerifier, lsp::Position},
-    logger,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -83,7 +83,7 @@ pub trait NetworkAdapter: Send {
 pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
     match cmd {
         WireMessage::Patch { uri, data } => {
-            logger::log(&format!(">> [Network] Received patch for {uri}"));
+            debug!("[Net] Received patch for {}", uri);
             Event::RemotePatch { uri, patch: data }
         }
         WireMessage::Cursor { uri, position } => {
@@ -98,17 +98,14 @@ pub fn into_internal(cmd: WireMessage, is_host: bool) -> Event {
         }
         WireMessage::RequestFullSync => {
             if is_host {
-                logger::log(">> [Network] Received sync request from peer.");
+                debug!("[Net] Received full sync request");
                 Event::PeerRequestedSync
             } else {
                 Event::Ignoring
             }
         }
         WireMessage::FullSyncResponse { files } => {
-            logger::log(&format!(
-                ">> [Network] Received full sync response with {} files.",
-                files.len()
-            ));
+            debug!("[Net] Received full sync containing {} files", files.len());
             Event::RemoteFullSync { files }
         }
     }

@@ -1,63 +1,23 @@
-use std::fs::{self, OpenOptions};
-use std::io::{ErrorKind, Write};
-use std::sync::OnceLock;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use chrono::Utc;
+/// Initializes the tracing subscriber.
+/// Returns a `WorkerGuard` that MUST be kept alive in `main()` to ensure logs are flushed.
+pub fn init(suffix: &str) -> WorkerGuard {
+    let file_appender = tracing_appender::rolling::never("/tmp", format!("just_sync-{suffix}.log"));
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-static LOG_FILE: OnceLock<String> = OnceLock::new();
+    tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()))
+        .with(
+            fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false) // No colors in file
+                .with_target(true)
+                .with_thread_ids(true),
+        )
+        .init();
 
-/// Initializes the binary's logger to /tmp/justsync.log.
-/// If a log file from a previous session exists, it will be deleted first.
-///
-/// # Panics
-///
-/// Panics should only happen on one of two occasions:
-///
-/// 1. For some reason, the file path could not be initialized
-/// 2. Something went wrong deleting the old log file - no previous file existing is okay and
-///    handled, that's not a panic!
-pub fn init(suffix: &str) {
-    let filename = format!("/tmp/justsync-{suffix}.log");
-    LOG_FILE.set(filename).unwrap();
-
-    let path = LOG_FILE.get().unwrap();
-
-    // Delete file if it already exists
-    let deleted = fs::remove_file(path);
-    if let Err(e) = deleted
-        && e.kind() != ErrorKind::NotFound
-    {
-        panic!("Unable to prepare log file: {e}");
-    }
-}
-
-/// Writes a log message to the log file, and creates the log file if none already exists.
-///
-/// # Arguments
-///
-/// * `msg` - The message to write to the file - format: '\[`process_id`] msg'
-///
-/// # Panics
-///
-/// * If the log file can not be opened or created whatsoever
-pub fn log(msg: &str) {
-    let unknown_path = "/tmp/justsync.log".to_string();
-    let path = LOG_FILE.get().unwrap_or(&unknown_path);
-
-    // Get PID
-    // let pid = std::process::id();
-
-    // Print to stderr (captured by VS Code output panel usually)
-    // eprintln!("[{}] {}", pid, msg);
-    
-    let time = Utc::now().to_string();
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .unwrap();
-
-    // Write with PID prefix
-    let _ = writeln!(file, "[{time}] {msg}");
+    tracing::info!("--- JustSync Tracing Started ({}) ---", suffix);
+    guard
 }

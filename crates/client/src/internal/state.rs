@@ -1,5 +1,6 @@
 use diamond_types::list::ListCRDT;
 use ropey::Rope;
+use tracing::{debug, error};
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
@@ -10,7 +11,6 @@ use crate::{
         diff,
         lsp::{Range, TextDocumentContentChangeEvent, TextEdit},
     },
-    logger,
 };
 
 #[must_use]
@@ -115,10 +115,7 @@ impl Document {
     ) -> Option<Vec<u8>> {
         // Echo guard
         if self.pending_remote_updates.load(Ordering::SeqCst) > 0 {
-            logger::log(&format!(
-                "Received update request - blocking. Pending counter: {}",
-                self.pending_remote_updates.load(Ordering::SeqCst)
-            ));
+            debug!("Blocking update request - Pending: {}", self.pending_remote_updates.load(Ordering::SeqCst));
             self.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
@@ -146,7 +143,7 @@ impl Document {
         }
 
         if patch_generated {
-            logger::log(">> Generating Patch for User Edit");
+            debug!("[Core] Generating patch for user edit");
             Some(
                 self.crdt
                     .oplog
@@ -180,11 +177,11 @@ impl Document {
                 self.content = new_rope.clone();
 
                 let edits = diff::calculate_edits(&old_rope, &new_rope);
-                logger::log(&format!("Calculated edits: {edits:?}"));
+                debug!("[Core] Calculated edits: {:?}", edits);
                 if edits.is_empty() { None } else { Some(edits) }
             }
             Err(e) => {
-                logger::log(&format!("!! [CRDT] Failed to merge: {e:?}"));
+                error!("[Core] Failed to merge: {:?}", e);
                 None
             }
         }

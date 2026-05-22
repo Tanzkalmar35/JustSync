@@ -4,11 +4,11 @@ use crate::internal::handler::{
     handle_open_cmd,
 };
 use crate::internal::lsp::{self, LspHeader};
-use crate::logger;
 use serde_json::json;
 use std::path::Path;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
+use tracing::{debug, error, info};
 
 #[must_use]
 pub struct StdioAdapter {
@@ -68,7 +68,17 @@ impl StdioAdapter {
 
     async fn read_msg(&mut self) -> anyhow::Result<Option<LspHeader>> {
         match lsp::read_message(&mut self.reader).await? {
-            Some(body) => Ok(Some(serde_json::from_str(&body)?)),
+            Some(body) => {
+                tracing::debug!("RAW LSP: {}", body);
+                match serde_json::from_str::<LspHeader>(&body) {
+                    Ok(header) => Ok(Some(header)),
+                    Err(e) => {
+                        tracing::error!("Failed to parse LspHeader: {} | Body: {}", e, body);
+                        // Don't crash the loop, just skip this message
+                        Ok(None)
+                    }
+                }
+            }
             None => Ok(None),
         }
     }
@@ -112,8 +122,11 @@ impl StdioAdapter {
 
     async fn process_editor_message(&self, header: LspHeader) {
         let Some(ref method) = header.method else {
+            debug!("Received message with no method (likely a response)");
             return;
         };
+
+        info!("[AAAAA] Editor sent {}", method);
 
         match method.as_str() {
             "textDocument/didOpen" => handle_open_cmd(header, &self.core_tx, &self.root_dir).await,
@@ -124,8 +137,9 @@ impl StdioAdapter {
                 handle_close_cmd(header, &self.core_tx, &self.root_dir).await;
             }
             "$/justsync/cursor" => handle_cursor_cmd(header, &self.core_tx, &self.root_dir).await,
+            "initialized" => debug!("Initialization with editor as lsp complete!"),
             _ => {
-                eprintln!("Editor handler received a command that's not implemented!");
+                error!("Editor handler received a command that's not implemented!: {}", method.as_str());
             }
         }
     }
@@ -148,7 +162,7 @@ impl EditorAdapter for StdioAdapter {
                             break;
                         }
                         Err(e) => {
-                            logger::log(&format!("!! Adapter Error: {e}"));
+                            error!("[Handler] An error occured while reading message from editor: {}", e);
                             break;
                         }
                     }
@@ -157,7 +171,7 @@ impl EditorAdapter for StdioAdapter {
                 // OUTBOUND: Core -> Handler -> Editor
                 Some(cmd) = editor_rx.recv() => {
                     if let Err(e) = self.send_cmd(cmd).await {
-                        logger::log(&format!("!! Failed to send to editor: {e}"));
+                        error!("[Handler] Failed to send message to editor: {}", e);
                     }
                 }
             }

@@ -123,24 +123,14 @@ Be warned, the installation, especially for the host, is quite tedious. I'll try
 ```Bash
 git clone https://github.com/Tanzkalmar35/justsync
 cd justsync
-cargo build --release
+cargo install --path crates/client
 ```
 
-The binary will be located at ./target/release/justsync.
-
-Next, you will have to make the binary accessible globally.
-
-#### Linux
-
-From the project root, run:
-
-```Bash
-cp target/release/JustSync /usr/local/bin/JustSync
-```
+This will install the `just_sync` binary to your cargo bin directory (usually `~/.cargo/bin`), which should be in your PATH.
 
 ### Additional setup
 
-The host has to make port 4444 publicly accessible. I personally have tested it only with port forwarding.
+The host has to make port 5000 publicly accessible (the relay server's default port). I personally have tested it only with port forwarding.
 
 ## 💻 Usage
 

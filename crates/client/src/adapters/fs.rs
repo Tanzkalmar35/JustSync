@@ -1,6 +1,8 @@
 use std::{fs, path::Path};
 
-use crate::{internal::fs::FsOps, logger};
+use tracing::{debug, info};
+
+use crate::internal::fs::FsOps;
 
 pub struct FileSystem;
 
@@ -41,7 +43,7 @@ impl FileSystem {
 
                     let uri = relative_path.replace('\\', "/");
 
-                    logger::log(&format!("Found file {}", &uri));
+                    info!("[Core] Found file {}", &uri);
                     results.push((uri, content));
                 }
             }
@@ -63,11 +65,11 @@ impl FsOps for FileSystem {
     fn write_project_files(&self, files: Vec<(String, String)>) -> anyhow::Result<()> {
         for (path_str, content) in files {
             if path_str.trim().is_empty() || path_str == "/" {
-                logger::log("Ignoring empty file path");
+                debug!("[Core] Ignoring empty file path");
                 continue;
             }
 
-            logger::log(&format!("Found file: {path_str}"));
+            info!("[Core] Found file: {}", path_str);
 
             // Ensure we are writing relatively to CWD
             let path = Path::new(&path_str);
@@ -77,7 +79,7 @@ impl FsOps for FileSystem {
                 .components()
                 .any(|c| matches!(c, std::path::Component::ParentDir))
             {
-                crate::logger::log(&format!("!! [FS] Skipped unsafe path: {path_str}"));
+                debug!("[Core] Skipped unsafe path: {}", path_str);
                 continue;
             }
 
@@ -86,7 +88,7 @@ impl FsOps for FileSystem {
             }
 
             fs::write(path, content)?;
-            crate::logger::log(&format!(">> [FS] Wrote: {path_str}"));
+            info!("[Core] Wrote: {}", path_str);
         }
         Ok(())
     }

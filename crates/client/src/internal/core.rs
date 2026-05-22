@@ -11,7 +11,7 @@ use crate::internal::handler::EditorCommand;
 use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::internal::network::NetworkCommand;
 use crate::internal::state::Workspace;
-use crate::logger;
+use tracing::{debug};
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -109,27 +109,35 @@ impl Core {
             tokio::select! {
                 Some(event) = rx.recv() => {
                     match event {
-                        Event::Ignoring => {},
+                        Event::Ignoring => {
+                            debug!("[Core] Ignoring event");
+                        },
                         Event::LocalChange { uri, changes } => {
+                            debug!("[Core] Handling local change");
                             self.handle_local_change(uri, changes, is_host).await;
                         }
                         Event::RemotePatch { uri, patch } => {
+                            debug!("[Core] Handling remote change");
                             self.handle_remote_patch(uri, &patch, is_host);
                         }
                         Event::LoadFromDisk { uri, content } => {
+                            debug!("[Core] Loading workspace from disk");
                             // Just update state, don't load into editor
                             self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                             self.last_flushed_ropes.insert(uri, Rope::from_str(&content));
                         }
                         Event::ClientDidOpen { uri, content } => {
+                            debug!("[Core] Handling open file event");
                             self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                             self.workspace.mark_open(uri.clone());
                             self.last_flushed_ropes.insert(uri, Rope::from_str(&content));
                         }
                         Event::ClientDidClose { uri } => {
+                            debug!("[Core] Handling close file event");
                             self.workspace.mark_closed(&uri);
                         }
                         Event::LocalCursorChange { uri, position } => {
+                            debug!("[Core] Handling local cursor change event");
                             let _ = self
                                 .network_tx
                                 .send(NetworkCommand::BroadcastCursor {
@@ -139,13 +147,14 @@ impl Core {
                                 .await;
                         }
                         Event::RemoteCursorChange { uri, position } => {
+                            debug!("[Core] Handling remote cursor change event");
                             let _ = self
                                 .editor_tx
                                 .send(EditorCommand::RemoteCursor { uri, position })
                                 .await;
                         }
                         Event::PeerRequestedSync => {
-                            logger::log(">> [Core] Peer requested sync. Bundling state...");
+                            debug!("[Core] Handling incoming full sync request");
                             let snapshot = self
                                 .workspace
                                 .get_snapshot()
@@ -159,9 +168,7 @@ impl Core {
                                 .await;
                         }
                         Event::RemoteFullSync { files } => {
-                            logger::log(
-                                ">> [Core] Received Full Sync. Hydrating & Writing to Disk...",
-                            );
+                            debug!("[Core] Handling incoming full sync");
 
                             let mut files_to_write = Vec::new();
                             for (uri, patch) in files {
@@ -183,15 +190,13 @@ impl Core {
 
                             // Write to Disk
                             if let Err(e) = fs.write_project_files(files_to_write) {
-                                logger::log(&format!(
-                                    "!! [Disk] Failed to write synced files: {e}"
-                                ));
+                                debug!("[Core] Failed to write file to disk: {}", e);
                             } else {
-                                logger::log(">> [Disk] Full sync written to storage.");
+                                debug!("[Core] Full sync written to disk");
                             }
                         }
                         Event::SessionRegistered { name } => {
-                            logger::log(&format!(">> [Core] Session registered as: {name}"));
+                            debug!("[Core] New session registered as {}", name);
                         }
                         Event::Shutdown => break,
                     }
@@ -217,10 +222,10 @@ impl Core {
         let uri_ref = uri.clone();
         if let Some(patch) = doc.apply_local_changes(changes.clone()) {
             for change in changes {
-                logger::log(&format!(
+                debug!(
                     "[Core - local] Generated patch for change '{}'",
                     change.text
-                ));
+                );
             }
             self.last_flushed_ropes.insert(uri_ref, doc.content.clone());
             let _ = self

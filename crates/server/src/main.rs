@@ -3,6 +3,7 @@ use quinn::{Connection, Endpoint, ServerConfig, VarInt};
 use serde::{Deserialize, Serialize};
 use server::server::Server;
 use server::session::Session;
+use tracing::{error, info};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
@@ -42,6 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install default crypto provider for rustls
     let _ = rustls::crypto::ring::default_provider().install_default();
 
+    // Initialize professional logging
+    tracing_subscriber::fmt::init();
+
     let args = ServerArgs::parse();
 
     let endpoint = setup(&args)?;
@@ -54,12 +58,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             match incoming.await {
                 Ok(connection) => {
-                    println!("New raw connection from: {}", connection.remote_address());
+                    info!("New raw connection from: {}", connection.remote_address());
                     if let Err(e) = handle_connection(connection, &server_ref).await {
-                        eprintln!("Connection handler failed: {e}");
+                        error!("Connection handler failed: {e}");
                     }
                 }
-                Err(e) => eprintln!("Failed to establish QUIC connection: {e}"),
+                Err(e) => error!("Failed to establish QUIC connection: {e}"),
             }
         });
     }
@@ -69,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn setup(args: &ServerArgs) -> Result<Endpoint, Box<dyn std::error::Error>> {
     let server_config = if args.dev {
-        println!("DEV_MODE: Generating self-signed certificate for localhost...");
+        info!("DEV_MODE: Generating self-signed certificate for localhost...");
         generate_self_signed_config()?
     } else {
         let cert_path_str = args
@@ -89,7 +93,7 @@ fn setup(args: &ServerArgs) -> Result<Endpoint, Box<dyn std::error::Error>> {
     // Bind the endpoint
     let listen_addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse()?;
     let endpoint = Endpoint::server(server_config, listen_addr)?;
-    println!("Relay running on {listen_addr}");
+    info!("Relay running on {listen_addr}");
     Ok(endpoint)
 }
 
@@ -122,8 +126,8 @@ fn generate_self_signed_config() -> Result<ServerConfig, Box<dyn std::error::Err
     // Print the token (hash of the certificate) so the client can use it for verification
     let hash = ring::digest::digest(&ring::digest::SHA256, cert_chain[0].as_ref());
     let token = hex::encode(hash.as_ref());
-    println!("--- DEV_MODE TOKEN: {token} ---");
-    println!("Use this token in your client configuration to verify the self-signed certificate.");
+    info!("--- DEV_MODE TOKEN: {token} ---");
+    info!("Use this token in your client configuration to verify the self-signed certificate.");
 
     Ok(server_config)
 }
@@ -143,7 +147,7 @@ pub fn load_certs(
     cert_path: &Path,
     key_path: &Path,
 ) -> Result<ServerConfig, Box<dyn std::error::Error>> {
-    println!("Loading TLS certificates...");
+    info!("Loading TLS certificates...");
 
     // Open the certificate and key files
     let cert_file = File::open(cert_path)
@@ -186,7 +190,7 @@ pub fn load_certs(
 
     server_config.transport_config(std::sync::Arc::new(transport_config));
 
-    println!("TLS certificates loaded successfully.");
+    info!("TLS certificates loaded successfully.");
     Ok(server_config)
 }
 
@@ -208,7 +212,7 @@ async fn handle_connection(
             let session = Session::new(Arc::new(connection.clone()), key);
             let session_name = session.name.clone();
 
-            println!("Host registering session: {session_name}");
+            info!("Host registering session: {session_name}");
 
             server.register_session(session.clone());
 
@@ -223,7 +227,7 @@ async fn handle_connection(
             name: session_id,
             key,
         } => {
-            println!("Peer trying to join session: {session_id}");
+            info!("Peer trying to join session: {session_id}");
 
             // Look up the Host's connection in the map
             if let Some(mut session) = server.find_session(&session_id) {
@@ -234,18 +238,18 @@ async fn handle_connection(
                 {
                     // send.write_all(b"{\"status\":\"error\", \"reason\":\"Invalid key\"}")
                     //     .await?;
-                    println!("Invalid key: {}", key.clone());
+                    info!("Invalid key: {}", key.clone());
                 }
             } else {
                 // send.write_all(b"{\"status\":\"error\", \"reason\":\"session not found\"}")
                 //     .await?;
-                println!("Session to join not found: {}", session_id.clone());
+                info!("Session to join not found: {}", session_id.clone());
             }
             tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
             send.shutdown().await.map_err(|e| e.to_string())?;
         }
         _ => {
-            eprintln!("Invalid controlmessage received");
+            error!("Invalid controlmessage received");
         }
     }
 
