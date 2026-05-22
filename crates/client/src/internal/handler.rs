@@ -42,7 +42,7 @@ pub async fn handle_open_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, r
                         content: params.text_document.text,
                     })
                     .await;
-            },
+            }
             Err(e) => error!("[Handler] An error occured reading didOpen params: {}", e),
         }
     }

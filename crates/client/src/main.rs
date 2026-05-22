@@ -1,13 +1,17 @@
 use clap::{Arg, Command};
-use tracing::{error, info};
 use std::process::exit;
 use tokio::sync::mpsc;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use just_sync::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
     internal::{
-        core::{Core, Event}, crypto::hash, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole}
+        core::{Core, Event},
+        crypto::hash,
+        fs::FsOps,
+        handler::EditorAdapter,
+        network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
     },
     logger,
 };
@@ -45,7 +49,7 @@ pub async fn main() {
     };
     let session = SessionCfg {
         agent_id: agent_id.clone(),
-        key: hash(&ctx.key), 
+        key: hash(&ctx.key),
         relay_addr: ctx.remote_ip.parse().unwrap(),
         role,
     };

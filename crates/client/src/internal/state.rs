@@ -1,16 +1,14 @@
 use diamond_types::list::ListCRDT;
 use ropey::Rope;
-use tracing::{debug, error};
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
+use tracing::{debug, error};
 
-use crate::{
-    internal::{
-        diff,
-        lsp::{Range, TextDocumentContentChangeEvent, TextEdit},
-    },
+use crate::internal::{
+    diff,
+    lsp::{Range, TextDocumentContentChangeEvent, TextEdit},
 };
 
 #[must_use]
@@ -115,7 +113,10 @@ impl Document {
     ) -> Option<Vec<u8>> {
         // Echo guard
         if self.pending_remote_updates.load(Ordering::SeqCst) > 0 {
-            debug!("Blocking update request - Pending: {}", self.pending_remote_updates.load(Ordering::SeqCst));
+            debug!(
+                "Blocking update request - Pending: {}",
+                self.pending_remote_updates.load(Ordering::SeqCst)
+            );
             self.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
@@ -234,21 +235,27 @@ mod tests {
     #[test]
     fn test_echo_suppression() {
         let mut doc = Document::new("initial", "agent-1", true);
-        
+
         // Simulate a remote update pending
         doc.pending_remote_updates.store(1, Ordering::SeqCst);
 
         // A local change comes in (echo)
         let change = TextDocumentContentChangeEvent {
             range: Some(Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 0 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
             }),
             text: "ignored".to_string(),
         };
 
         let patch = doc.apply_local_changes(vec![change]);
-        
+
         // Must be None because it was suppressed
         assert!(patch.is_none());
         // Counter should be decremented
@@ -259,21 +266,30 @@ mod tests {
     fn test_crdt_convergence_with_hydration() {
         // 1. Host starts with "Hello"
         let mut host = Document::new("Hello", "host-agent", true);
-        
+
         // 2. Peer starts empty
         let mut peer = Document::new("", "peer-agent", false);
 
         // 3. Initial Hydration: Host sends its current state to Peer
-        let hydration_patch = host.crdt.oplog.encode(diamond_types::list::encoding::EncodeOptions::default());
+        let hydration_patch = host
+            .crdt
+            .oplog
+            .encode(diamond_types::list::encoding::EncodeOptions::default());
         peer.apply_remote_patch(&hydration_patch);
-        
+
         assert_eq!(peer.content.to_string(), "Hello");
 
         // 4. Concurrent changes
         let change_host = TextDocumentContentChangeEvent {
             range: Some(Range {
-                start: Position { line: 0, character: 5 },
-                end: Position { line: 0, character: 5 },
+                start: Position {
+                    line: 0,
+                    character: 5,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
             }),
             text: " Alice".to_string(),
         };
@@ -281,8 +297,14 @@ mod tests {
 
         let change_peer = TextDocumentContentChangeEvent {
             range: Some(Range {
-                start: Position { line: 0, character: 5 },
-                end: Position { line: 0, character: 5 },
+                start: Position {
+                    line: 0,
+                    character: 5,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
             }),
             text: " Bob".to_string(),
         };
@@ -304,16 +326,32 @@ mod tests {
 
         let snapshot = ws.get_snapshot();
         assert_eq!(snapshot.len(), 2);
-        
+
         // Verify we can hydrate a new workspace from this snapshot
         let mut new_ws = Workspace::new("peer".to_string());
         for (uri, patch) in snapshot {
             let doc = new_ws.get_or_create_empty(uri.as_str(), false);
             doc.apply_remote_patch(&patch);
         }
-        
-        assert_eq!(new_ws.documents.get("file1.txt").unwrap().content.to_string(), "content1");
-        assert_eq!(new_ws.documents.get("file2.txt").unwrap().content.to_string(), "content2");
+
+        assert_eq!(
+            new_ws
+                .documents
+                .get("file1.txt")
+                .unwrap()
+                .content
+                .to_string(),
+            "content1"
+        );
+        assert_eq!(
+            new_ws
+                .documents
+                .get("file2.txt")
+                .unwrap()
+                .content
+                .to_string(),
+            "content2"
+        );
     }
 
     #[test]
@@ -322,24 +360,57 @@ mod tests {
         let mut peer_b = Document::new("", "b", false);
 
         // 1. A types something
-        let patch1 = peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
-            range: Some(Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } }),
-            text: "The quick brown fox".to_string(),
-        }]).unwrap();
-        
+        let patch1 = peer_a
+            .apply_local_changes(vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                }),
+                text: "The quick brown fox".to_string(),
+            }])
+            .unwrap();
+
         // 2. B receives it
         peer_b.apply_remote_patch(&patch1);
 
         // 3. Concurrent edits: A deletes "quick", B inserts "lazy " before "fox"
-        let patch_a = peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
-            range: Some(Range { start: Position { line: 0, character: 4 }, end: Position { line: 0, character: 10 } }),
-            text: "".to_string(),
-        }]).unwrap();
+        let patch_a = peer_a
+            .apply_local_changes(vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 4,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 10,
+                    },
+                }),
+                text: "".to_string(),
+            }])
+            .unwrap();
 
-        let patch_b = peer_b.apply_local_changes(vec![TextDocumentContentChangeEvent {
-            range: Some(Range { start: Position { line: 0, character: 16 }, end: Position { line: 0, character: 16 } }),
-            text: "lazy ".to_string(),
-        }]).unwrap();
+        let patch_b = peer_b
+            .apply_local_changes(vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 16,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 16,
+                    },
+                }),
+                text: "lazy ".to_string(),
+            }])
+            .unwrap();
 
         // 4. Swap patches
         peer_a.apply_remote_patch(&patch_b);

@@ -97,7 +97,9 @@ async fn handle_connection(
             key,
         } => {
             if let Some(mut session) = server.find_session(&session_id) {
-                let _ = session.join(Arc::new(connection.clone()), key, &mut send).await;
+                let _ = session
+                    .join(Arc::new(connection.clone()), key, &mut send)
+                    .await;
             }
             tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
             send.finish()?;

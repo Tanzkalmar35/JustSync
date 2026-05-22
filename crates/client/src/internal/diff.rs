@@ -138,10 +138,10 @@ mod tests {
     // Helper to apply edits to a string for verification
     fn apply_edits_to_string(text: &str, edits: &[TextEdit]) -> String {
         let mut rope = Rope::from_str(text);
-        // We must apply edits in reverse order if they overlap, but since 
+        // We must apply edits in reverse order if they overlap, but since
         // calculate_edits should return non-overlapping edits in order,
         // we can apply them by calculating the character offsets.
-        // However, the safest way to verify is to apply them one by one, 
+        // However, the safest way to verify is to apply them one by one,
         // but note that each edit's range refers to the ORIGINAL rope.
         // Thus, we apply them from back to front to avoid shifting indices.
         let mut sorted_edits = edits.to_vec();

@@ -38,7 +38,7 @@ impl Session {
     ///
     /// # Panics
     ///
-    /// * If no lock on 
+    /// * If no lock on
     /// * If `send` can't report status
     pub async fn join<W>(
         &mut self,
@@ -86,13 +86,19 @@ impl Session {
     }
 }
 
+impl PartialEq for Session {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{AsyncRead, AsyncWrite};
     use std::pin::Pin;
-    use std::task::{Context, Poll};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, AsyncWrite};
 
     #[derive(Clone)]
     struct MockConnection {
@@ -101,22 +107,54 @@ mod tests {
 
     impl MockConnection {
         fn new() -> Self {
-            Self { open_count: Arc::new(AtomicUsize::new(0)) }
+            Self {
+                open_count: Arc::new(AtomicUsize::new(0)),
+            }
         }
     }
 
     #[async_trait::async_trait]
     impl Connection for MockConnection {
-        async fn open_bidi_stream(&self) -> Result<(Box<dyn AsyncWrite + Unpin + Send>, Box<dyn AsyncRead + Unpin + Send>), String> {
+        async fn open_bidi_stream(
+            &self,
+        ) -> Result<
+            (
+                Box<dyn AsyncWrite + Unpin + Send>,
+                Box<dyn AsyncRead + Unpin + Send>,
+            ),
+            String,
+        > {
             self.open_count.fetch_add(1, Ordering::SeqCst);
             struct DummyStream;
             impl AsyncRead for DummyStream {
-                fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: &mut tokio::io::ReadBuf<'_>) -> Poll<std::io::Result<()>> { Poll::Ready(Ok(())) }
+                fn poll_read(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                    _: &mut tokio::io::ReadBuf<'_>,
+                ) -> Poll<std::io::Result<()>> {
+                    Poll::Ready(Ok(()))
+                }
             }
             impl AsyncWrite for DummyStream {
-                fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> { Poll::Ready(Ok(buf.len())) }
-                fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> { Poll::Ready(Ok(())) }
-                fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> { Poll::Ready(Ok(())) }
+                fn poll_write(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                    buf: &[u8],
+                ) -> Poll<std::io::Result<usize>> {
+                    Poll::Ready(Ok(buf.len()))
+                }
+                fn poll_flush(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                ) -> Poll<std::io::Result<()>> {
+                    Poll::Ready(Ok(()))
+                }
+                fn poll_shutdown(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                ) -> Poll<std::io::Result<()>> {
+                    Poll::Ready(Ok(()))
+                }
             }
             Ok((Box::new(DummyStream), Box::new(DummyStream)))
         }
@@ -163,15 +201,18 @@ mod tests {
     async fn test_relay_logic_orchestration() {
         // This test verifies that the server attempts to open streams (hotwire)
         // between the correct parties.
-        
+
         let host_conn = Arc::new(MockConnection::new());
         let mut session = Session::new(host_conn.clone(), "key".to_string());
-        
+
         // Peer 1 Joins
         let p1_conn = Arc::new(MockConnection::new());
         let mut sink = Vec::new();
-        session.join(p1_conn.clone(), "key".to_string(), &mut sink).await.unwrap();
-        
+        session
+            .join(p1_conn.clone(), "key".to_string(), &mut sink)
+            .await
+            .unwrap();
+
         // After P1 joins, we expect 1 hotwire task started (Host <-> P1).
         // Each hotwire task calls open_bidi_stream on both parties.
         // Wait a tiny bit for the spawned tasks to run
@@ -181,10 +222,13 @@ mod tests {
 
         // Peer 2 Joins
         let p2_conn = Arc::new(MockConnection::new());
-        session.join(p2_conn.clone(), "key".to_string(), &mut sink).await.unwrap();
-        
+        session
+            .join(p2_conn.clone(), "key".to_string(), &mut sink)
+            .await
+            .unwrap();
+
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-        
+
         // P2 joins -> triggers Host <-> P2 AND P1 <-> P2
         // Total Host opens: 2 (one for P1, one for P2)
         // Total P1 opens: 2 (one for Host, one for P2)
@@ -192,11 +236,5 @@ mod tests {
         assert_eq!(host_conn.open_count.load(Ordering::SeqCst), 2);
         assert_eq!(p1_conn.open_count.load(Ordering::SeqCst), 2);
         assert_eq!(p2_conn.open_count.load(Ordering::SeqCst), 2);
-    }
-}
-
-impl PartialEq for Session {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
     }
 }

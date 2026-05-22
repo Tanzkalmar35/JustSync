@@ -139,7 +139,10 @@ impl StdioAdapter {
             "$/justsync/cursor" => handle_cursor_cmd(header, &self.core_tx, &self.root_dir).await,
             "initialized" => debug!("Initialization with editor as lsp complete!"),
             _ => {
-                error!("Editor handler received a command that's not implemented!: {}", method.as_str());
+                error!(
+                    "Editor handler received a command that's not implemented!: {}",
+                    method.as_str()
+                );
             }
         }
     }

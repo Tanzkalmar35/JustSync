@@ -11,7 +11,7 @@ use crate::internal::handler::EditorCommand;
 use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::internal::network::NetworkCommand;
 use crate::internal::state::Workspace;
-use tracing::{debug};
+use tracing::debug;
 
 #[derive(Clone, Debug)]
 pub enum Event {

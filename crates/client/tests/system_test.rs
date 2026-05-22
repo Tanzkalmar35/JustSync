@@ -2,19 +2,23 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use just_sync::internal::core::{Core, Event};
-use just_sync::internal::network::{SessionCfg, SessionRole, NetworkAdapter};
 use just_sync::adapters::network::QuicNetworkAdapter;
+use just_sync::internal::core::{Core, Event};
 use just_sync::internal::fs::FsOps;
 use just_sync::internal::handler::EditorCommand;
 use just_sync::internal::lsp::TextDocumentContentChangeEvent;
+use just_sync::internal::network::{NetworkAdapter, SessionCfg, SessionRole};
 
 #[derive(Clone)]
 struct MockFs;
 impl FsOps for MockFs {
-    fn scan_project_directory(&self, _path: &str) -> Vec<(String, String)> { vec![] }
+    fn scan_project_directory(&self, _path: &str) -> Vec<(String, String)> {
+        vec![]
+    }
 
-    fn write_project_files(&self, _files: Vec<(String, String)>) -> anyhow::Result<()> { Ok(()) }
+    fn write_project_files(&self, _files: Vec<(String, String)>) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -33,7 +37,10 @@ async fn test_full_system_sync() {
 
         let mut crypto = rustls::ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(vec![cert_der], rustls_pki_types::PrivateKeyDer::Pkcs8(priv_key))
+            .with_single_cert(
+                vec![cert_der],
+                rustls_pki_types::PrivateKeyDer::Pkcs8(priv_key),
+            )
             .unwrap();
         crypto.alpn_protocols = vec![b"justsync".to_vec()];
 
@@ -41,7 +48,8 @@ async fn test_full_system_sync() {
             quinn::crypto::rustls::QuicServerConfig::try_from(crypto).unwrap(),
         ));
         let mut transport_config = quinn::TransportConfig::default();
-        transport_config.max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into().unwrap()));
+        transport_config
+            .max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into().unwrap()));
         server_config.transport_config(std::sync::Arc::new(transport_config));
 
         let endpoint = quinn::Endpoint::server(server_config, relay_addr).unwrap();
@@ -63,16 +71,30 @@ async fn test_full_system_sync() {
 
                     match msg {
                         server::ControlMessage::Register { key: _ } => {
-                            let session = server::session::Session::new(std::sync::Arc::new(connection.clone()), "test-key".to_string());
+                            let session = server::session::Session::new(
+                                std::sync::Arc::new(connection.clone()),
+                                "test-key".to_string(),
+                            );
                             let session_name = session.name.clone();
                             server_ref.register_session(session);
-                            let ans = server::ControlMessage::SessionCreated { status: "ok".to_string(), name: session_name };
-                            send.write_all(&serde_json::to_vec(&ans).unwrap()).await.unwrap();
+                            let ans = server::ControlMessage::SessionCreated {
+                                status: "ok".to_string(),
+                                name: session_name,
+                            };
+                            send.write_all(&serde_json::to_vec(&ans).unwrap())
+                                .await
+                                .unwrap();
                             send.finish().unwrap();
                         }
                         server::ControlMessage::Join { name, key: _ } => {
                             if let Some(mut session) = server_ref.find_session(&name) {
-                                let _ = session.join(std::sync::Arc::new(connection.clone()), "test-key".to_string(), &mut send).await;
+                                let _ = session
+                                    .join(
+                                        std::sync::Arc::new(connection.clone()),
+                                        "test-key".to_string(),
+                                        &mut send,
+                                    )
+                                    .await;
                             }
                         }
                         _ => {}
@@ -88,7 +110,7 @@ async fn test_full_system_sync() {
     let host_id = "host-client".to_string();
     let (host_net_tx, host_net_rx) = mpsc::channel(100);
     let (host_editor_tx, _host_editor_rx) = mpsc::channel::<EditorCommand>(100);
-    
+
     // This channel is where the network adapter sends events
     let (network_to_test_tx, mut network_to_test_rx) = mpsc::channel(100);
     // This channel is where we forward events to the Core
@@ -101,14 +123,17 @@ async fn test_full_system_sync() {
         role: SessionRole::Host {},
     };
 
-    tokio::spawn(QuicNetworkAdapter::connect_and_run(host_session, network_to_test_tx, host_net_rx));
-    
+    tokio::spawn(QuicNetworkAdapter::connect_and_run(
+        host_session,
+        network_to_test_tx,
+        host_net_rx,
+    ));
+
     // Spawn Host Core
     let host_core = Core::new(host_id, host_net_tx, host_editor_tx);
     tokio::spawn(host_core.run(test_to_core_rx, true, MockFs));
 
     // Proxy loop to capture session name
-    let mut session_name = String::new();
     let proxy_handle = tokio::spawn({
         let test_to_core_tx = test_to_core_tx.clone();
         async move {
@@ -125,8 +150,8 @@ async fn test_full_system_sync() {
             name
         }
     });
-    
-    session_name = proxy_handle.await.unwrap();
+
+    let session_name = proxy_handle.await.unwrap();
 
     // 3. Setup Peer Client
     let peer_id = "peer-client".to_string();
@@ -139,11 +164,17 @@ async fn test_full_system_sync() {
         agent_id: peer_id.clone(),
         key: "test-key".to_string(),
         relay_addr: actual_relay_addr,
-        role: SessionRole::Peer { session_name: session_name.clone() },
+        role: SessionRole::Peer {
+            session_name: session_name.clone(),
+        },
     };
 
-    tokio::spawn(QuicNetworkAdapter::connect_and_run(peer_session, peer_network_to_test_tx, peer_net_rx));
-    
+    tokio::spawn(QuicNetworkAdapter::connect_and_run(
+        peer_session,
+        peer_network_to_test_tx,
+        peer_net_rx,
+    ));
+
     // Spawn Peer Core
     let peer_core = Core::new(peer_id, peer_net_tx, peer_editor_tx);
     tokio::spawn(peer_core.run(peer_test_to_core_rx, false, MockFs));
@@ -168,8 +199,14 @@ async fn test_full_system_sync() {
         uri: "test.txt".to_string(),
         changes: vec![TextDocumentContentChangeEvent {
             range: Some(just_sync::internal::lsp::Range {
-                start: just_sync::internal::lsp::Position { line: 0, character: 0 },
-                end: just_sync::internal::lsp::Position { line: 0, character: 0 },
+                start: just_sync::internal::lsp::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: just_sync::internal::lsp::Position {
+                    line: 0,
+                    character: 0,
+                },
             }),
             text: "Hello from Host".to_string(),
         }],
@@ -177,7 +214,8 @@ async fn test_full_system_sync() {
     test_to_core_tx.send(host_change).await.unwrap();
 
     // Peer should eventually receive a RemotePatch
-    let received = tokio::time::timeout(Duration::from_secs(5), peer_proxy_handle).await
+    let received = tokio::time::timeout(Duration::from_secs(5), peer_proxy_handle)
+        .await
         .expect("Timeout waiting for peer to receive patch")
         .unwrap();
 

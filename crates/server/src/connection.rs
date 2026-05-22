@@ -51,18 +51,23 @@ pub async fn hotwire(a: Arc<dyn Connection>, b: Arc<dyn Connection>) -> () {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+
+    type AsyncWriter = Box<dyn tokio::io::AsyncWrite + Unpin + Send>;
+    type AsyncReader = Box<dyn tokio::io::AsyncRead + Unpin + Send>;
 
     struct MockConnection {
         // We use a channel or duplex to simulate the network
-        pub stream_tx: tokio::sync::Mutex<Option<(Box<dyn tokio::io::AsyncWrite + Unpin + Send>, Box<dyn tokio::io::AsyncRead + Unpin + Send>)>>,
+        pub stream_tx: tokio::sync::Mutex<Option<(AsyncWriter, AsyncReader)>>,
     }
 
     #[async_trait::async_trait]
     impl Connection for MockConnection {
-        async fn open_bidi_stream(&self) -> Result<(Box<dyn tokio::io::AsyncWrite + Unpin + Send>, Box<dyn tokio::io::AsyncRead + Unpin + Send>), String> {
+        async fn open_bidi_stream(&self) -> Result<(AsyncWriter, AsyncReader), String> {
             let mut guard = self.stream_tx.lock().await;
-            guard.take().ok_or_else(|| "Stream already opened".to_string())
+            guard
+                .take()
+                .ok_or_else(|| "Stream already opened".to_string())
         }
         fn remote_address(&self) -> std::net::SocketAddr {
             "127.0.0.1:0".parse().unwrap()
@@ -80,10 +85,16 @@ mod tests {
         let (b_relay_read, b_relay_write) = tokio::io::split(b_relay);
 
         let conn_a = Arc::new(MockConnection {
-            stream_tx: tokio::sync::Mutex::new(Some((Box::new(a_relay_write), Box::new(a_relay_read)))),
+            stream_tx: tokio::sync::Mutex::new(Some((
+                Box::new(a_relay_write),
+                Box::new(a_relay_read),
+            ))),
         });
         let conn_b = Arc::new(MockConnection {
-            stream_tx: tokio::sync::Mutex::new(Some((Box::new(b_relay_write), Box::new(b_relay_read)))),
+            stream_tx: tokio::sync::Mutex::new(Some((
+                Box::new(b_relay_write),
+                Box::new(b_relay_read),
+            ))),
         });
 
         // 2. Start Hotwire

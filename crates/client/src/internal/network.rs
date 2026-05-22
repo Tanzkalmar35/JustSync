@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use crate::{
-    internal::{core::Event, crypto::NoVerifier, lsp::Position},
-};
+use crate::internal::{core::Event, crypto::NoVerifier, lsp::Position};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WireMessage {

@@ -1,5 +1,5 @@
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Initializes the tracing subscriber.
 /// Returns a `WorkerGuard` that MUST be kept alive in `main()` to ensure logs are flushed.

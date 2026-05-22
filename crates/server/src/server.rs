@@ -55,9 +55,9 @@ impl Server {
 mod tests {
     use super::*;
     use crate::models::Connection;
-    use tokio::io::{AsyncRead, AsyncWrite};
     use std::pin::Pin;
     use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, AsyncWrite};
 
     // A minimal Mock Connection that implements our new trait
     #[derive(Clone)]
@@ -65,16 +65,46 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Connection for MockConnection {
-        async fn open_bidi_stream(&self) -> Result<(Box<dyn AsyncWrite + Unpin + Send>, Box<dyn AsyncRead + Unpin + Send>), String> {
+        async fn open_bidi_stream(
+            &self,
+        ) -> Result<
+            (
+                Box<dyn AsyncWrite + Unpin + Send>,
+                Box<dyn AsyncRead + Unpin + Send>,
+            ),
+            String,
+        > {
             // We don't even need real streams for registry tests
             struct DummyStream;
             impl AsyncRead for DummyStream {
-                fn poll_read(self: Pin<&mut Self>, _: &mut Context<'_>, _: &mut tokio::io::ReadBuf<'_>) -> Poll<std::io::Result<()>> { Poll::Ready(Ok(())) }
+                fn poll_read(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                    _: &mut tokio::io::ReadBuf<'_>,
+                ) -> Poll<std::io::Result<()>> {
+                    Poll::Ready(Ok(()))
+                }
             }
             impl AsyncWrite for DummyStream {
-                fn poll_write(self: Pin<&mut Self>, _: &mut Context<'_>, _: &[u8]) -> Poll<std::io::Result<usize>> { Poll::Ready(Ok(0)) }
-                fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> { Poll::Ready(Ok(())) }
-                fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> { Poll::Ready(Ok(())) }
+                fn poll_write(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                    _: &[u8],
+                ) -> Poll<std::io::Result<usize>> {
+                    Poll::Ready(Ok(0))
+                }
+                fn poll_flush(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                ) -> Poll<std::io::Result<()>> {
+                    Poll::Ready(Ok(()))
+                }
+                fn poll_shutdown(
+                    self: Pin<&mut Self>,
+                    _: &mut Context<'_>,
+                ) -> Poll<std::io::Result<()>> {
+                    Poll::Ready(Ok(()))
+                }
             }
             Ok((Box::new(DummyStream), Box::new(DummyStream)))
         }
@@ -101,7 +131,7 @@ mod tests {
     fn test_collision_handling() {
         let server = Server::setup();
         let conn = Arc::new(MockConnection);
-        
+
         // 1. Register first session
         let s1 = Session::new(conn.clone(), "key1".to_string());
         let name1 = s1.name.clone();
@@ -116,7 +146,7 @@ mod tests {
 
         // 4. Verify we now have two different sessions
         assert_eq!(server.sessions.len(), 2);
-        
+
         let found1 = server.find_session(&name1).unwrap();
         assert_eq!(found1.name, name1);
     }

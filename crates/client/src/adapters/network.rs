@@ -10,14 +10,12 @@ use std::{cmp::Ordering, collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info};
 
-use crate::{
-    internal::{
-        self,
-        core::Event,
-        network::{
-            ControlMessage, NetworkAdapter, NetworkCommand, SessionCfg, SessionRole, WireMessage,
-            configure_client, into_external, into_internal,
-        },
+use crate::internal::{
+    self,
+    core::Event,
+    network::{
+        ControlMessage, NetworkAdapter, NetworkCommand, SessionCfg, SessionRole, WireMessage,
+        configure_client, into_external, into_internal,
     },
 };
 
