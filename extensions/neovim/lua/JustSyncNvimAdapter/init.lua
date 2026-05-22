@@ -2,7 +2,7 @@ local M = {}
 
 M.config = {
     cmd_path = "just_sync",
-    log_level = vim.log.levels.INFO,
+    log_level = vim.log.levels.DEBUG,
 }
 
 M.autocmd_registered = false
@@ -55,29 +55,6 @@ local function handle_remote_cursor(err, result, ctx, config)
     })
 end
 
-local function scan_log_for_token()
-    local log_path = vim.lsp.get_log_path()
-    local file = io.open(log_path, "r")
-    if not file then return false end
-
-    local size = file:seek("end")
-    local start_pos = math.max(0, size - 5000)
-    file:seek("set", start_pos)
-
-    local content = file:read("*a")
-    file:close()
-
-    if content then
-        for line in content:gmatch("[^\r\n]+") do
-            if line:find("Token") then
-                status_msg("Token Found: " .. line:match("Token.*") or line)
-                return true
-            end
-        end
-    end
-    return false
-end
-
 local function launch_client(args, mode_name)
     local root_dir = vim.fs.dirname(vim.fs.find({ '.git', 'Cargo.toml', 'package.json' }, { upward = true })[1])
     if not root_dir then root_dir = vim.fn.getcwd() end
@@ -111,21 +88,10 @@ local function launch_client(args, mode_name)
             setup_buffer_autocommands(bufnr)
             status_msg("JustSync Attached (" .. mode_name .. ")")
 
-            if mode_name == "Host" then
-                local timer = vim.loop.new_timer()
-                local count = 0
-                if timer then
-                    timer:start(1000, 1000, function()
-                        count = count + 1
-                        if count > 20 then
-                            timer:close()
-                            return
-                        end
-                        vim.schedule(function()
-                            if scan_log_for_token() then timer:close() end
-                        end)
-                    end)
-                end
+            local orig_notify = client.rpc.notify
+            client.rpc.notify = function(method, params)
+                vim.notify("[JustSync RPC] " .. method .. " " .. vim.inspect(params), vim.log.levels.DEBUG)
+                return orig_notify(method, params)
             end
 
             -- Setup outbound cursor tracking
@@ -211,4 +177,3 @@ function M.setup(opts)
 end
 
 return M
-
