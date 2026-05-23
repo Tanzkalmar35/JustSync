@@ -8,7 +8,7 @@
 
 It utilizes **CRDTs (Conflict-free Replicated Data Types)** for mathematical consistency and **QUIC** for low-latency transport, ensuring that collaborative editing feels native, even over unreliable networks.
 
-> **⚠️ Alpha Warning:** This software is currently in active development (v0.1.0). While the core synchronization logic is stable, edge cases may still exist. Use with caution on critical data.
+> **⚠️ Alpha Warning:** This software is currently in active development (v0.2.0). While the core synchronization logic is stable, edge cases may still exist. Use with caution on critical data.
 
 ---
 
@@ -196,9 +196,9 @@ If you want to self-host the relay server however, please follow [the according 
 Using JustSync after having it set up is pretty straight forward, you just interact with the editor extension. 
 Exactly how each editor extension works you can find out by following the respective links.
 
-*   **Neovim:** [../../extensions/neovim](../../extensions/neovim)
-*   **VS Code:** [../../extensions/vscode](../../extensions/vscode)
-*   **IntelliJ IDEA:** [../../extensions/jetbrains](../../extensions/jetbrains)
+*   **Neovim:** [justsync.nvim](https://github.com/Tanzkalmar35/JustSync/tree/master/extensions/neovim)
+*   **VS Code:** [justsync-vscode](https://github.com/Tanzkalmar35/JustSync/tree/master/extensions/vscode)
+*   **IntelliJ IDEA:** [justsync-jetbrains](https://github.com/Tanzkalmar35/JustSync/tree/master/extensions/jetbrains)
 
 ## 📄 License
 This project is licensed under the GNU Affero General Public License v3.0 (AGPLv3).
