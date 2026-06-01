@@ -32,19 +32,21 @@ end
 
 local function handle_remote_cursor(err, result, ctx, config)
     if err then return end
-    if not result or not result.uri or not result.position then return end
+    if not result or not result.uri or not result.position or not result.agent_id then return end
 
     local raw_uri = result.uri
     local position = result.position
+    local agent_id = result.agent_id
     local uri = raw_uri:match("^%w+://") and raw_uri or vim.uri_from_fname(raw_uri)
     local bufnr = vim.uri_to_bufnr(uri)
 
     if not vim.api.nvim_buf_is_loaded(bufnr) then return end
 
-    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+    local extmark_id = get_extmark_id(agent_id)
 
     -- Draw the remote cursor
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns_id, position.line, position.character, {
+        id = extmark_id,
         end_col = position.character + 1,
         hl_group = 'JustSyncRemoteCursor',
         hl_mode = 'replace',
@@ -75,6 +77,9 @@ local function launch_client(args, mode_name)
         flags = { debounce_text_changes = 150 },
         handlers = {
             ['$/justsync/remoteCursor'] = handle_remote_cursor,
+            ['$/justsync/sessionCreated'] = function(_, res)
+                vim.notify(res.name)
+            end,
             ['window/showMessage'] = function(_, result)
                 if result then status_msg(result.message, result.type == 1) end
             end,

@@ -26,7 +26,7 @@ struct PeerContext {
 
 pub struct QuicNetworkAdapter {
     session: SessionCfg,
-    peers: Arc<Mutex<HashMap<String, PeerContext>>>,
+    peers: Arc<Mutex<HashMap<String, PeerContext>>>, // agent_id -> peer
     core_send: mpsc::Sender<Event>,
     core_recv: Mutex<mpsc::Receiver<NetworkCommand>>,
 }
@@ -158,7 +158,7 @@ impl QuicNetworkAdapter {
 
             // Run receiving map for each peer in a separate thread
             tokio::spawn(async move {
-                self_recv.recv_loop(recv, &peer_secret).await;
+                self_recv.recv_loop(recv, &peer_secret, &remote_agent_id).await;
             });
         } else {
             panic!("Invalid setup msg received, expected Init, got {msg:?}");
@@ -259,11 +259,11 @@ impl QuicNetworkAdapter {
         Err(String::from("E2EE setup process failed!"))
     }
 
-    async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream, cipher: &ChaCha20Poly1305) {
+    async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream, cipher: &ChaCha20Poly1305, agent_id: &String) {
         loop {
             match self.recv_framed(&mut recv, Some(cipher)).await {
                 Ok(wire_msg) => {
-                    let event = into_internal(wire_msg, self.is_host());
+                    let event = into_internal(wire_msg, agent_id, self.is_host());
                     match self.core_send.send(event.clone()).await {
                         Ok(()) => debug!("[Net] Populated patch to editor"),
                         Err(e) => error!(

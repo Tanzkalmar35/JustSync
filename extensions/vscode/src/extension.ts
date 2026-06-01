@@ -8,12 +8,36 @@ import {
 
 let client: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem;
+let cursorDecoration: vscode.TextEditorDecorationType;
+let selectionChangeListener: vscode.Disposable | undefined;
 
-// Point this to your global binary or absolute path
+// Map of agent_id -> { uri: string, range: vscode.Range }
+const remoteCursors = new Map<string, { uri: string, range: vscode.Range }>();
+
 const SERVER_PATH = "just_sync";
+
+interface RemoteCursorParams {
+    agent_id: string;
+    uri: string;
+    position: {
+        line: number;
+        character: number;
+    };
+}
 
 export function activate(context: vscode.ExtensionContext) {
     console.log(">> JustSync Extension Active");
+
+    // Create a decoration type for the remote cursor
+    cursorDecoration = vscode.window.createTextEditorDecorationType({
+        backgroundColor: "rgba(49, 116, 143, 0.5)", // Semi-transparent blue
+        border: "1px solid #31748f",
+        after: {
+            contentText: "┃",
+            color: "#31748f",
+            fontWeight: "bold",
+        },
+    });
 
     // 1. Create Status Bar Button
     statusBarItem = vscode.window.createStatusBarItem(
@@ -58,7 +82,6 @@ async function showStartMenu() {
     let modeLabel = "";
 
     if (selection.startsWith("Host")) {
-
         args = ["--mode", "host"];
         modeLabel = "Host";
 
@@ -86,8 +109,8 @@ async function showStartMenu() {
         const session_name = await vscode.window.showInputBox({ title: "Session name" });
         if (!session_name) return;
 
-        args.push("--remote-ip");
-        args.push(relay_addr);
+        args.push("--session-name");
+        args.push(session_name);
 
         const password = await vscode.window.showInputBox({ title: "Password to use" });
         if (!password) return;
@@ -107,7 +130,6 @@ async function startClient(args: string[], modeLabel: string) {
 
     const clientOptions: LanguageClientOptions = {
         documentSelector: [{ scheme: "file", language: "*" }],
-        // Prevent VS Code from complaining if the server crashes during dev
         errorHandler: {
             error: () => ({ action: 2 }), // Shutdown
             closed: () => ({ action: 2 }), // Do not restart
@@ -123,6 +145,15 @@ async function startClient(args: string[], modeLabel: string) {
 
     try {
         await client.start();
+
+        // Handle remote cursor notifications from the server
+        client.onNotification("$/justsync/remoteCursor", (params: RemoteCursorParams) => {
+            handleRemoteCursor(params);
+        });
+
+        // Track local cursor movements to send to peers
+        setupLocalCursorTracking();
+
         updateStatusBar(true, modeLabel);
         vscode.window.showInformationMessage(`JustSync Started (${modeLabel})`);
     } catch (e) {
@@ -131,7 +162,62 @@ async function startClient(args: string[], modeLabel: string) {
     }
 }
 
+function setupLocalCursorTracking() {
+    if (selectionChangeListener) {
+        selectionChangeListener.dispose();
+    }
+
+    selectionChangeListener = vscode.window.onDidChangeTextEditorSelection((e) => {
+        if (client && client.isRunning()) {
+            const position = e.selections[0].active;
+            const params = {
+                textDocument: { uri: e.textEditor.document.uri.toString() },
+                position: {
+                    line: position.line,
+                    character: position.character
+                }
+            };
+            client.sendNotification("$/justsync/cursor", params);
+        }
+    });
+}
+
+function handleRemoteCursor(params: RemoteCursorParams) {
+    const pos = new vscode.Position(params.position.line, params.position.character);
+    const range = new vscode.Range(pos, pos);
+    
+    // Store the new position
+    remoteCursors.set(params.agent_id, { uri: params.uri, range });
+
+    // Update decorations for all visible editors
+    updateAllRemoteCursors();
+}
+
+function updateAllRemoteCursors() {
+    for (const editor of vscode.window.visibleTextEditors) {
+        const uri = editor.document.uri.toString();
+        const ranges = Array.from(remoteCursors.values())
+            .filter(c => c.uri === uri)
+            .map(c => c.range);
+        
+        editor.setDecorations(cursorDecoration, ranges);
+    }
+}
+
 async function stopClient() {
+    if (selectionChangeListener) {
+        selectionChangeListener.dispose();
+        selectionChangeListener = undefined;
+    }
+
+    // Clear local state
+    remoteCursors.clear();
+
+    // Clear all remote cursor decorations
+    vscode.window.visibleTextEditors.forEach(editor => {
+        editor.setDecorations(cursorDecoration, []);
+    });
+
     if (!client) return;
 
     try {
@@ -151,7 +237,7 @@ function updateStatusBar(running: boolean, info?: string) {
         statusBarItem.tooltip = "Click to Stop JustSync";
         statusBarItem.backgroundColor = new vscode.ThemeColor(
             "statusBarItem.warningBackground",
-        ); // Orange
+        );
     } else {
         statusBarItem.text = `$(play) JustSync`;
         statusBarItem.tooltip = "Click to Start Host/Join";

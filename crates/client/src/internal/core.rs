@@ -11,7 +11,7 @@ use crate::internal::handler::EditorCommand;
 use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
 use crate::internal::network::NetworkCommand;
 use crate::internal::state::Workspace;
-use tracing::debug;
+use tracing::{debug, error, info};
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -52,6 +52,7 @@ pub enum Event {
     },
 
     RemoteCursorChange {
+        agent_id: String,
         uri: String,
         position: Position,
     },
@@ -107,6 +108,7 @@ impl Core {
 
         loop {
             tokio::select! {
+                // Network inbound
                 Some(event) = rx.recv() => {
                     match event {
                         Event::Ignoring => {
@@ -146,11 +148,11 @@ impl Core {
                                 })
                                 .await;
                         }
-                        Event::RemoteCursorChange { uri, position } => {
+                        Event::RemoteCursorChange { agent_id, uri, position } => {
                             debug!("[Core] Handling remote cursor change event");
                             let _ = self
                                 .editor_tx
-                                .send(EditorCommand::RemoteCursor { uri, position })
+                                .send(EditorCommand::RemoteCursor { agent_id, uri, position })
                                 .await;
                         }
                         Event::PeerRequestedSync => {
@@ -196,7 +198,10 @@ impl Core {
                             }
                         }
                         Event::SessionRegistered { name } => {
-                            debug!("[Core] New session registered as {}", name);
+                            info!("[Core] New session registered as {}", name);
+                            if let Err(e) = self.editor_tx.send(EditorCommand::SessionCreated { name }).await {
+                                error!("{}", e)
+                            }
                         }
                         Event::Shutdown => break,
                     }

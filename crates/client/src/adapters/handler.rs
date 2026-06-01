@@ -104,14 +104,29 @@ impl StdioAdapter {
                 });
                 self.write_rpc(&msg.to_string()).await?;
             }
-            EditorCommand::RemoteCursor { uri, position } => {
+            EditorCommand::RemoteCursor {
+                agent_id,
+                uri,
+                position,
+            } => {
                 let abs_uri = format!("file://{}", Path::new(&self.root_dir).join(&uri).display());
                 let msg = json!({
                     "jsonrpc": "2.0",
                     "method": "$/justsync/remoteCursor",
                     "params": {
+                        "agent_id": agent_id,
                         "uri": abs_uri,
                         "position": position
+                    }
+                });
+                self.write_rpc(&msg.to_string()).await?;
+            }
+            EditorCommand::SessionCreated { name } => {
+                let msg = json!({
+                    "jsonrpc": "2.0",
+                    "method": "$/justsync/sessionCreated",
+                    "params": {
+                        "name": name
                     }
                 });
                 self.write_rpc(&msg.to_string()).await?;

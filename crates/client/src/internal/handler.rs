@@ -12,8 +12,18 @@ use crate::internal::{
 
 #[derive(Debug, Clone)]
 pub enum EditorCommand {
-    ApplyEdits { uri: String, edits: Vec<TextEdit> },
-    RemoteCursor { uri: String, position: Position },
+    ApplyEdits {
+        uri: String,
+        edits: Vec<TextEdit>,
+    },
+    RemoteCursor {
+        agent_id: String,
+        uri: String,
+        position: Position,
+    },
+    SessionCreated {
+        name: String
+    }
 }
 
 #[async_trait::async_trait]

@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.wm.StatusBar
@@ -14,6 +15,8 @@ import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.Consumer
 import java.awt.event.MouseEvent
 import javax.swing.JOptionPane 
+
+private val LOG = Logger.getInstance(JustSyncStatusBarWidgetFactory::class.java)
 
 class JustSyncStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId() = "JustSyncStatusBar"

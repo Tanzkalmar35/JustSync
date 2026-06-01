@@ -34,8 +34,8 @@ pub async fn main() {
     info!("Starting JustSync in {} mode", ctx.mode);
 
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
-    let (net_out_tx, net_out_rx) = mpsc::channel::<NetworkCommand>(100);
-    let (editor_out_tx, editor_out_rx) = mpsc::channel(100);
+    let (net_tx, net_rx) = mpsc::channel::<NetworkCommand>(100);
+    let (editor_tx, editor_rx) = mpsc::channel(100);
 
     let agent_id = Uuid::new_v4().to_string();
 
@@ -56,7 +56,7 @@ pub async fn main() {
     tokio::spawn(QuicNetworkAdapter::connect_and_run(
         session,
         core_tx.clone(),
-        net_out_rx,
+        net_rx,
     ));
 
     // Host: Scan files
@@ -70,12 +70,12 @@ pub async fn main() {
     }
 
     // Spawn Core
-    let core = Core::new(agent_id, net_out_tx, editor_out_tx);
+    let core = Core::new(agent_id, net_tx, editor_tx);
     tokio::spawn(core.run(core_rx, is_host, fs));
 
     // Run editor adapter on main thread
     let mut adapter = StdioAdapter::new(core_tx);
-    adapter.run(editor_out_rx).await;
+    adapter.run(editor_rx).await;
 }
 
 fn parse_cmd() -> Context {
