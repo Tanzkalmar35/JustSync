@@ -11,8 +11,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
 #[must_use]
-pub struct StdioAdapter {
-    reader: BufReader<tokio::io::Stdin>,
+pub struct StdioAdapter { reader: BufReader<tokio::io::Stdin>,
     stdout: tokio::io::Stdout,
     core_tx: mpsc::Sender<Event>,
     root_dir: String,
@@ -69,7 +68,6 @@ impl StdioAdapter {
     async fn read_msg(&mut self) -> anyhow::Result<Option<LspHeader>> {
         match lsp::read_message(&mut self.reader).await? {
             Some(body) => {
-                tracing::debug!("RAW LSP: {}", body);
                 match serde_json::from_str::<LspHeader>(&body) {
                     Ok(header) => Ok(Some(header)),
                     Err(e) => {
@@ -140,8 +138,6 @@ impl StdioAdapter {
             debug!("Received message with no method (likely a response)");
             return;
         };
-
-        info!("[AAAAA] Editor sent {}", method);
 
         match method.as_str() {
             "textDocument/didOpen" => handle_open_cmd(header, &self.core_tx, &self.root_dir).await,
