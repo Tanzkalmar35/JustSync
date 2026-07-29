@@ -27,7 +27,7 @@ function dump(o)
 end
 
 function M.handle_remote_cursor(err, result, ctx, _config)
-    print("Result: ", dump(result))
+    -- print("Result: ", dump(result))
     if err or not result then return end
     if not result.uri or not result.position or not result.agent_id then return end
 
@@ -62,7 +62,7 @@ function M.handle_remote_cursor(err, result, ctx, _config)
         hl_mode = "replace",
         priority = 1000,
         virt_text = { { "┃", hl_group } },
-        virt_text_pos = "orverlay,"
+        virt_text_pos = "overlay"
     }
 
     if peer and peer.bufnr == bufnr then

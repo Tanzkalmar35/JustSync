@@ -52,7 +52,7 @@ function M.launch_client(args, mode_name)
         handlers     = {
             ["$/justsync/remoteCursor"]   = cursors.handle_remote_cursor,
             ["$/justsync/sessionCreated"] = function(_, res)
-                vim.notify(res.name)
+                vim.notify("JustSync session created: " .. res.name)
             end,
             ["window/showMessage"]        = function(_, result)
                 if result then ui.status_msg(result.message, result.type == 1) end
