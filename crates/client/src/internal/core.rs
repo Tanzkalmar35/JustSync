@@ -1,5 +1,4 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::Ordering;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use ropey::Rope;
@@ -82,9 +81,8 @@ pub struct Core {
     // The Outputs
     network_tx: mpsc::Sender<NetworkCommand>, // Send patches to peers
     editor_tx: mpsc::Sender<EditorCommand>,   // Send edits to editor
-    //
+
     dirty_files: HashSet<String>,
-    last_flushed_ropes: HashMap<String, Rope>,
 }
 
 impl Core {
@@ -98,7 +96,6 @@ impl Core {
             network_tx,
             editor_tx,
             dirty_files: HashSet::new(),
-            last_flushed_ropes: HashMap::new(),
         }
     }
 
@@ -126,13 +123,12 @@ impl Core {
                             debug!("[Core] Loading workspace from disk");
                             // Just update state, don't load into editor
                             self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
-                            self.last_flushed_ropes.insert(uri, Rope::from_str(&content));
                         }
                         Event::ClientDidOpen { uri, content } => {
                             debug!("[Core] Handling open file event");
-                            self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
+                            let doc = self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
+                            doc.content_shadow = Rope::from_str(&content);
                             self.workspace.mark_open(uri.clone());
-                            self.last_flushed_ropes.insert(uri, Rope::from_str(&content));
                         }
                         Event::ClientDidClose { uri } => {
                             debug!("[Core] Handling close file event");
@@ -220,32 +216,69 @@ impl Core {
         changes: Vec<TextDocumentContentChangeEvent>,
         is_host: bool,
     ) {
-        // Get the document
         let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
 
-        // Apply logic (The logic inside Document should return the binary patch if effective)
-        let uri_ref = uri.clone();
-        if let Some(patch) = doc.apply_local_changes(changes.clone()) {
-            for change in changes {
-                debug!(
-                    "[Core - local] Generated patch for change '{}'",
-                    change.text
-                );
+        if !doc.apply_local_changes(changes) {
+            return;
+        }
+
+        let current_version = doc.crdt.oplog.local_version().clone();
+        if current_version != doc.last_version {
+            let patch = doc.get_patch_since(&doc.last_version);
+            if !patch.is_empty() {
+                let _ = self
+                    .network_tx
+                    .send(NetworkCommand::BroadcastPatch { uri, patch })
+                    .await;
             }
-            self.last_flushed_ropes.insert(uri_ref, doc.content.clone());
-            let _ = self
-                .network_tx
-                .send(NetworkCommand::BroadcastPatch { uri, patch })
-                .await;
+            doc.last_version = current_version;
         }
     }
 
-    fn handle_remote_patch(&mut self, uri: String, patch: &[u8], is_host: bool) {
-        let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
-        let _ = doc.apply_remote_patch(patch);
+    // async fn handle_local_change(
+    //     &mut self,
+    //     uri: String,
+    //     changes: Vec<TextDocumentContentChangeEvent>,
+    //     is_host: bool,
+    // ) {
+    //     // Get the document
+    //     let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
+    //
+    //     // Apply logic (The logic inside Document should return the binary patch if effective)
+    //     if !doc.apply_local_changes(changes.clone()) {
+    //         return;
+    //     }
+    //
+    //     let current_version = doc.crdt.oplog.local_version().clone();
+    //
+    //     if current_version != doc.last_version {
+    //         let patch = doc.get_patch_since(&doc.last_version);
+    //
+    //         if !patch.is_empty() {
+    //             let _ = self
+    //                 .network_tx
+    //                 .send(NetworkCommand::BroadcastPatch {
+    //                     uri: uri.clone(),
+    //                     patch,
+    //                 })
+    //                 .await;
+    //         }
+    //
+    //         doc.last_version = current_version
+    //     }
+    // }
 
-        if self.workspace.is_open(&uri) {
+    fn handle_remote_patch(&mut self, uri: String, patch: &[u8], is_host: bool) {
+        let is_open = self.workspace.is_open(&uri);
+        let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
+
+        if let Some(edits) = doc.apply_remote_patch(patch)
+            && !edits.is_empty()
+            && is_open
+        {
             self.dirty_files.insert(uri);
+        } else if !is_open {
+            doc.content_shadow = doc.content.clone();
         }
     }
 
@@ -253,15 +286,9 @@ impl Core {
         for uri in self.dirty_files.drain().collect::<Vec<_>>() {
             let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
 
-            let old_rope = self
-                .last_flushed_ropes
-                .entry(uri.clone())
-                .or_insert_with(|| Rope::from_str(""));
-            let edits = diff::calculate_edits(old_rope, &doc.content);
+            let edits = diff::calculate_edits(&doc.content_shadow, &doc.content);
 
             if !edits.is_empty() {
-                *old_rope = doc.content.clone();
-
                 let _ = self
                     .editor_tx
                     .send(EditorCommand::ApplyEdits {
@@ -269,8 +296,32 @@ impl Core {
                         edits,
                     })
                     .await;
-                doc.pending_remote_updates.fetch_add(1, Ordering::SeqCst);
             }
         }
     }
 }
+
+//     async fn flush_dirty_files(&mut self, is_host: bool) {
+//         for uri in self.dirty_files.drain().collect::<Vec<_>>() {
+//             let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
+//
+//             let old_rope = self
+//                 .last_flushed_ropes
+//                 .entry(uri.clone())
+//                 .or_insert_with(|| Rope::from_str(""));
+//             let edits = diff::calculate_edits(old_rope, &doc.content);
+//
+//             if !edits.is_empty() {
+//                 *old_rope = doc.content.clone();
+//
+//                 let _ = self
+//                     .editor_tx
+//                     .send(EditorCommand::ApplyEdits {
+//                         uri: uri.clone(),
+//                         edits,
+//                     })
+//                     .await;
+//             }
+//         }
+//     }
+// }

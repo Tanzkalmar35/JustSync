@@ -1,14 +1,14 @@
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-use crate::{internal::{
+use crate::internal::{
     core::Event,
     fs::to_relative_path,
     lsp::{
         CursorPositionParams, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader, Position,
         TextEdit,
     },
-}, logger};
+};
 
 #[derive(Debug, Clone)]
 pub enum EditorCommand {
@@ -22,8 +22,8 @@ pub enum EditorCommand {
         position: Position,
     },
     SessionCreated {
-        name: String
-    }
+        name: String,
+    },
 }
 
 #[async_trait::async_trait]

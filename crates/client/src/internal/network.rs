@@ -78,7 +78,7 @@ pub trait NetworkAdapter: Send {
 }
 
 #[must_use]
-pub fn into_internal(cmd: WireMessage, agent_id: &String, is_host: bool) -> Event {
+pub fn into_internal(cmd: WireMessage, agent_id: &str, is_host: bool) -> Event {
     match cmd {
         WireMessage::Patch { uri, data } => {
             debug!("[Net] Received patch for {}", uri);
@@ -87,7 +87,7 @@ pub fn into_internal(cmd: WireMessage, agent_id: &String, is_host: bool) -> Even
         WireMessage::Cursor { uri, position } => {
             let (line, char) = position;
             Event::RemoteCursorChange {
-                agent_id: agent_id.clone(),
+                agent_id: agent_id.to_string(),
                 uri,
                 position: Position {
                     line,

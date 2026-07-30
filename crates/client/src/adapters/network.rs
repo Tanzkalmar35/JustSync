@@ -259,7 +259,7 @@ impl QuicNetworkAdapter {
         Err(String::from("E2EE setup process failed!"))
     }
 
-    async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream, cipher: &ChaCha20Poly1305, agent_id: &String) {
+    async fn recv_loop(self: Arc<Self>, mut recv: quinn::RecvStream, cipher: &ChaCha20Poly1305, agent_id: &str) {
         loop {
             match self.recv_framed(&mut recv, Some(cipher)).await {
                 Ok(wire_msg) => {

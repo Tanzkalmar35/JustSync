@@ -1,4 +1,3 @@
-use dissimilar::Chunk;
 use ropey::Rope;
 
 use crate::internal::lsp::{Position, Range, TextEdit};
@@ -72,50 +71,18 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     let old_middle = old.slice(start..old_end).to_string();
     let new_middle = new.slice(start..new_end).to_string();
 
-    let chunks = dissimilar::diff(&old_middle, &new_middle);
-
     let mut edits = Vec::new();
-    let mut current_pos = start;
 
-    for chunk in chunks {
-        match chunk {
-            Chunk::Equal(text) => {
-                // Just advance the cursor.
-                current_pos += text.chars().count();
-            }
-            Chunk::Delete(text) => {
-                let len = text.chars().count();
-                // Emit deletion from current_pos to current_pos + len
-                let start_pos = offset_to_position(old, current_pos);
-                let end_pos = offset_to_position(old, current_pos + len);
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: start_pos,
-                        end: end_pos,
-                    },
-                    new_text: String::new(),
-                });
-
-                // Advance cursor past the deleted text
-                current_pos += len;
-            }
-            Chunk::Insert(text) => {
-                // Emit insertion at current_pos
-                let pos = offset_to_position(old, current_pos);
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: pos.clone(),
-                        end: pos,
-                    },
-                    new_text: text.to_string(),
-                });
-                // Do NOT advance 'current_pos' because we inserted text at this spot;
-                // the original text hasn't been consumed.
-            }
-        }
+    if !old_middle.is_empty() || !new_middle.is_empty() {
+        edits.push(TextEdit {
+            range: Range {
+                start: offset_to_position(old, start),
+                end: offset_to_position(old, old_end),
+            },
+            new_text: new_middle,
+        });
     }
+
     edits
 }
 

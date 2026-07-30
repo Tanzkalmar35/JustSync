@@ -1,10 +1,10 @@
-use diamond_types::list::ListCRDT;
-use ropey::Rope;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::atomic::{AtomicUsize, Ordering},
+use diamond_types::{
+    LocalVersion, Time,
+    list::{ListCRDT, encoding::EncodeOptions},
 };
-use tracing::{debug, error};
+use ropey::Rope;
+use std::collections::{HashMap, HashSet};
+use tracing::error;
 
 use crate::internal::{
     diff,
@@ -72,9 +72,11 @@ impl Workspace {
 /// Encapsulates the synchronization logic ("The Brain of the File").
 #[must_use]
 pub struct Document {
-    /// The "View" - What the user sees in the editor.
-    /// Optimized for random access and slicing.
     pub content: Rope,
+
+    pub content_shadow: Rope,
+
+    pub last_version: LocalVersion,
 
     /// The "Truth" - The mathematical CRDT history.
     /// Handles conflict resolution.
@@ -82,8 +84,6 @@ pub struct Document {
 
     /// The ID of the local agent (used for tagging CRDT ops).
     agent_id: String,
-
-    pub pending_remote_updates: AtomicUsize,
 }
 
 impl Document {
@@ -96,96 +96,166 @@ impl Document {
             crdt.insert(agent, 0, initial_content);
         }
 
+        let initial_version = crdt.branch.local_version();
+
         Self {
             content: Rope::from_str(initial_content),
+            content_shadow: Rope::from_str(initial_content),
+            last_version: initial_version,
             crdt,
             agent_id: agent_id.to_string(),
-            pending_remote_updates: AtomicUsize::new(0),
         }
     }
 
     /// Processes changes from the editor.
     /// Returns: `Some(Vec<u8>)` (the patch bytes) if the network needs to be notified.
     /// Returns: `None` if the change was an echo or no-op.
-    pub fn apply_local_changes(
-        &mut self,
-        changes: Vec<TextDocumentContentChangeEvent>,
-    ) -> Option<Vec<u8>> {
-        // Echo guard
-        if self.pending_remote_updates.load(Ordering::SeqCst) > 0 {
-            debug!(
-                "Blocking update request - Pending: {}",
-                self.pending_remote_updates.load(Ordering::SeqCst)
-            );
-            self.pending_remote_updates.fetch_sub(1, Ordering::SeqCst);
-            return None;
+    pub fn apply_local_changes(&mut self, changes: Vec<TextDocumentContentChangeEvent>) -> bool {
+        let mut new_content = self.content_shadow.clone();
+        for change in &changes {
+            Document::apply_change_to_rope(&mut new_content, change);
         }
 
-        let mut patch_generated = false;
+        // Echo
+        if new_content == self.content {
+            self.content_shadow = new_content;
+            return false
+        }
 
-        for change in changes {
-            // Calculate change offsets
-            if let Some(range) = &change.range {
-                let (start, end) = Self::get_offsets_from_rope(&self.content, range);
-                let agent = self.crdt.get_or_create_agent_id(&self.agent_id);
+        let user_edits = diff::calculate_edits(&self.content, &new_content);
+        let mut crdt_changed = false;
 
-                // Apply changes
-                if start < end {
-                    self.crdt.delete(agent, start..end);
-                }
-                if !change.text.is_empty() {
-                    self.crdt.insert(agent, start, &change.text);
-                }
-                patch_generated = true;
+        for edit in &user_edits {
+            let (start, end) = Self::get_offsets_from_rope(&self.content, &edit.range);
+            let agent = self.crdt.get_or_create_agent_id(&self.agent_id);
+
+            if start < end {
+                self.crdt.delete(agent, start..end);
+                crdt_changed = true;
             }
-
-            // Update editor view (rope)
-            Self::apply_change_to_rope(&mut self.content, &change);
+            if !edit.new_text.is_empty() {
+                self.crdt.insert(agent, start, &edit.new_text);
+                crdt_changed = true;
+            }
         }
 
-        if patch_generated {
-            debug!("[Core] Generating patch for user edit");
-            Some(
-                self.crdt
-                    .oplog
-                    .encode(diamond_types::list::encoding::EncodeOptions::default()),
-            )
-        } else {
-            None
-        }
+        // 5. Update shadow to the editor's actual reported view
+        self.content_shadow = new_content;
+
+        // 6. Sync content with the CRDT
+        self.content = Rope::from_str(&self.crdt.branch.content().to_string());
+
+        crdt_changed
     }
+
+    // pub fn apply_local_changes(&mut self, changes: Vec<TextDocumentContentChangeEvent>) -> bool {
+    //     let mut patch_generated = false;
+    //
+    //     for change in changes {
+    //         // Calculate change offsets
+    //         if let Some(range) = &change.range {
+    //             let (start, end) = Self::get_offsets_from_rope(&self.content_prelim, range);
+    //             let agent = self.crdt.get_or_create_agent_id(&self.agent_id);
+    //
+    //             // Apply changes
+    //             if start < end {
+    //                 self.crdt.delete(agent, start..end);
+    //             }
+    //             if !change.text.is_empty() {
+    //                 self.crdt.insert(agent, start, &change.text);
+    //             }
+    //         } else {
+    //             // Full document replacement
+    //             let agent = self.crdt.get_or_create_agent_id(&self.agent_id);
+    //
+    //             // Delete the entire current CRDT content
+    //             let current_len = self.crdt.branch.len();
+    //             if current_len > 0 {
+    //                 self.crdt.delete(agent, 0..current_len);
+    //             }
+    //
+    //             // Insert the new content at position 0
+    //             if !change.text.is_empty() {
+    //                 self.crdt.insert(agent, 0, &change.text);
+    //             }
+    //         }
+    //
+    //         // Update editor view (rope)
+    //         Self::apply_change_to_rope(&mut self.content_prelim, &change);
+    //
+    //         patch_generated = true;
+    //     }
+    //
+    //     patch_generated
+    // }
 
     /// Processes a patch from a peer.
     /// Returns: `Some(Vec<TextEdit>)` if the editor needs to be updated.
     pub fn apply_remote_patch(&mut self, patch: &[u8]) -> Option<Vec<TextEdit>> {
-        let old_rope = self.content.clone();
+        let old_shadow = self.content_shadow.clone();
 
-        // Merge CRDT Patch into Oplog
-        let merge_result = self.crdt.oplog.decode_and_add(patch);
-
-        match merge_result {
+        match self.crdt.oplog.decode_and_add(patch) {
             Ok(_) => {
-                // Fast-forward the current branch state
-                // Without this, 'branch.content()' returns empty string,
-                // causing the system to think it needs to re-insert everything.
                 self.crdt
                     .branch
                     .merge(&self.crdt.oplog, self.crdt.oplog.local_version_ref());
 
-                // Reconstruct text
-                let new_text = self.crdt.branch.content().to_string();
-                let new_rope = Rope::from_str(&new_text);
-                self.content = new_rope.clone();
+                let new_content = Rope::from_str(&self.crdt.branch.content().to_string());
+                self.content = new_content;
 
-                let edits = diff::calculate_edits(&old_rope, &new_rope);
-                debug!("[Core] Calculated edits: {:?}", edits);
-                if edits.is_empty() { None } else { Some(edits) }
+                let edits = diff::calculate_edits(&old_shadow, &self.content);
+
+                self.last_version = self.crdt.oplog.local_version();
+
+                if !edits.is_empty() { Some(edits) } else { None }
             }
             Err(e) => {
                 error!("[Core] Failed to merge: {:?}", e);
                 None
             }
         }
+    }
+
+    // pub fn apply_remote_patch(&mut self, patch: &[u8]) -> Option<Vec<TextEdit>> {
+    //     let old_rope = self.content.clone();
+    //
+    //     // Merge CRDT Patch into Oplog
+    //     let merge_result = self.crdt.oplog.decode_and_add(patch);
+    //
+    //     match merge_result {
+    //         Ok(_) => {
+    //             // Fast-forward the current branch state
+    //             // Without this, 'branch.content()' returns empty string,
+    //             // causing the system to think it needs to re-insert everything.
+    //             self.crdt
+    //                 .branch
+    //                 .merge(&self.crdt.oplog, self.crdt.oplog.local_version_ref());
+    //
+    //             // Reconstruct text
+    //             let new_text = self.crdt.branch.content().to_string();
+    //             let new_rope = Rope::from_str(&new_text);
+    //             self.content = new_rope.clone();
+    //
+    //             let edits = diff::calculate_edits(&old_rope, &new_rope);
+    //             debug!("[Core] Calculated edits: {:?}", edits);
+    //
+    //             self.last_version = self.crdt.oplog.local_version();
+    //
+    //             if edits.is_empty() {
+    //                 None
+    //             } else {
+    //                 Some(edits)
+    //             }
+    //         }
+    //         Err(e) => {
+    //             error!("[Core] Failed to merge: {:?}", e);
+    //             None
+    //         }
+    //     }
+    // }
+
+    pub fn get_patch_since(&self, since: &[Time]) -> Vec<u8> {
+        self.crdt.oplog.encode_from(EncodeOptions::default(), since)
     }
 
     // =========================================================================
@@ -208,7 +278,7 @@ impl Document {
     }
 
     /// Helper to mutate a Rope based on an LSP change event
-    fn apply_change_to_rope(rope: &mut Rope, change: &TextDocumentContentChangeEvent) {
+    pub(crate) fn apply_change_to_rope(rope: &mut Rope, change: &TextDocumentContentChangeEvent) {
         if let Some(range) = &change.range {
             let (s, e) = Self::get_offsets_from_rope(rope, range);
 
@@ -233,14 +303,19 @@ mod tests {
     use crate::internal::lsp::{Position, Range};
 
     #[test]
-    fn test_echo_suppression() {
-        let mut doc = Document::new("initial", "agent-1", true);
+    fn test_sync() {
+        let mut doc = Document::new("hello", "agent-1", true);
 
-        // Simulate a remote update pending
-        doc.pending_remote_updates.store(1, Ordering::SeqCst);
-
-        // A local change comes in (echo)
         let change = TextDocumentContentChangeEvent {
+            range: None,
+            text: "world".to_string(),
+        };
+        assert!(doc.apply_local_changes(vec![change]));
+
+        assert_eq!(doc.content.to_string(), "world");
+        assert_eq!(doc.crdt.branch.content().to_string(), "world");
+
+        let incremental_change = TextDocumentContentChangeEvent {
             range: Some(Range {
                 start: Position {
                     line: 0,
@@ -251,35 +326,190 @@ mod tests {
                     character: 0,
                 },
             }),
-            text: "ignored".to_string(),
+            text: "hello ".to_string(),
+        };
+        assert!(doc.apply_local_changes(vec![incremental_change]));
+
+        assert_eq!(doc.content.to_string(), "hello world");
+        assert_eq!(doc.crdt.branch.content().to_string(), "hello world");
+    }
+
+    #[test]
+    fn test_local_change_without_pending_remote() {
+        let mut doc = Document::new("initial", "agent-1", true);
+
+        let change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 7,
+                },
+                end: Position {
+                    line: 0,
+                    character: 7,
+                },
+            }),
+            text: " extra".to_string(),
         };
 
-        let patch = doc.apply_local_changes(vec![change]);
+        assert!(doc.apply_local_changes(vec![change]));
+        assert_eq!(doc.content.to_string(), "initial extra");
+        assert_eq!(doc.content_shadow.to_string(), "initial extra");
+    }
 
-        // Must be None because it was suppressed
-        assert!(patch.is_none());
-        // Counter should be decremented
-        assert_eq!(doc.pending_remote_updates.load(Ordering::SeqCst), 0);
+    #[test]
+    fn test_pure_echo_suppression() {
+        let mut local = Document::new("hello", "agent-local", true);
+        let mut remote = Document::new("", "agent-remote", false);
+
+        // Hydrate remote with the initial state so its CRDT has "hello"
+        let hydration_patch = local
+            .crdt
+            .oplog
+            .encode(diamond_types::list::encoding::EncodeOptions::default());
+        remote.apply_remote_patch(&hydration_patch);
+        remote.content_shadow = remote.content.clone();
+
+        // Remote peer inserts " world"
+        let remote_change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 5,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
+            }),
+            text: " world".to_string(),
+        };
+        assert!(remote.apply_local_changes(vec![remote_change]));
+
+        // Send the remote patch to the local document
+        let patch = remote
+            .crdt
+            .oplog
+            .encode(diamond_types::list::encoding::EncodeOptions::default());
+        let edits = local
+            .apply_remote_patch(&patch)
+            .expect("remote patch should produce edits");
+        assert!(!edits.is_empty());
+
+        // Local editor has not yet echoed, so shadow is still the old view
+        assert_eq!(local.content_shadow.to_string(), "hello");
+        assert_eq!(local.content.to_string(), "hello world");
+
+        // Editor echoes the remote edit
+        let echo = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 5,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
+            }),
+            text: " world".to_string(),
+        };
+
+        let result = local.apply_local_changes(vec![echo]);
+        assert!(!result, "echo should be suppressed");
+
+        assert_eq!(local.content.to_string(), "hello world");
+        assert_eq!(local.content_shadow.to_string(), "hello world");
+    }
+
+    #[test]
+    fn test_mixed_echo_and_user_input() {
+        let mut local = Document::new("hello", "agent-local", true);
+        let mut remote = Document::new("", "agent-remote", false);
+
+        // Hydrate remote with the initial state so its CRDT has "hello"
+        let hydration_patch = local
+            .crdt
+            .oplog
+            .encode(diamond_types::list::encoding::EncodeOptions::default());
+        remote.apply_remote_patch(&hydration_patch);
+        remote.content_shadow = remote.content.clone();
+
+        // Remote peer inserts " remote"
+        let remote_change = TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 5,
+                },
+                end: Position {
+                    line: 0,
+                    character: 5,
+                },
+            }),
+            text: " remote".to_string(),
+        };
+        assert!(remote.apply_local_changes(vec![remote_change]));
+
+        let patch = remote
+            .crdt
+            .oplog
+            .encode(diamond_types::list::encoding::EncodeOptions::default());
+        local.apply_remote_patch(&patch);
+
+        // Editor echoes the remote edit, then the user types " user"
+        let mixed_changes = vec![
+            TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 5,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 5,
+                    },
+                }),
+                text: " remote".to_string(),
+            },
+            TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 12,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 12,
+                    },
+                }),
+                text: " user".to_string(),
+            },
+        ];
+
+        let result = local.apply_local_changes(mixed_changes);
+        assert!(result, "user portion should be applied");
+
+        assert_eq!(local.content.to_string(), "hello remote user");
+        assert_eq!(local.content_shadow.to_string(), "hello remote user");
     }
 
     #[test]
     fn test_crdt_convergence_with_hydration() {
-        // 1. Host starts with "Hello"
         let mut host = Document::new("Hello", "host-agent", true);
-
-        // 2. Peer starts empty
         let mut peer = Document::new("", "peer-agent", false);
 
-        // 3. Initial Hydration: Host sends its current state to Peer
+        // Initial Hydration: Host sends its current state to Peer
         let hydration_patch = host
             .crdt
             .oplog
             .encode(diamond_types::list::encoding::EncodeOptions::default());
         peer.apply_remote_patch(&hydration_patch);
+        peer.content_shadow = peer.content.clone();
 
         assert_eq!(peer.content.to_string(), "Hello");
 
-        // 4. Concurrent changes
+        // Concurrent changes
         let change_host = TextDocumentContentChangeEvent {
             range: Some(Range {
                 start: Position {
@@ -293,7 +523,9 @@ mod tests {
             }),
             text: " Alice".to_string(),
         };
-        let patch_host = host.apply_local_changes(vec![change_host]).unwrap();
+        assert!(host.apply_local_changes(vec![change_host]));
+        let patch_host = host.get_patch_since(&host.last_version);
+        host.last_version = host.crdt.oplog.local_version();
 
         let change_peer = TextDocumentContentChangeEvent {
             range: Some(Range {
@@ -308,13 +540,15 @@ mod tests {
             }),
             text: " Bob".to_string(),
         };
-        let patch_peer = peer.apply_local_changes(vec![change_peer]).unwrap();
+        assert!(peer.apply_local_changes(vec![change_peer]));
+        let patch_peer = peer.get_patch_since(&peer.last_version);
+        peer.last_version = peer.crdt.oplog.local_version();
 
-        // 5. Swap patches
+        // Swap patches
         host.apply_remote_patch(&patch_peer);
         peer.apply_remote_patch(&patch_host);
 
-        // 6. They must converge
+        // They must converge
         assert_eq!(host.content.to_string(), peer.content.to_string());
     }
 
@@ -360,63 +594,65 @@ mod tests {
         let mut peer_b = Document::new("", "b", false);
 
         // 1. A types something
+        assert!(peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
+            }),
+            text: "The quick brown fox".to_string(),
+        }]));
+
         let patch1 = peer_a
-            .apply_local_changes(vec![TextDocumentContentChangeEvent {
-                range: Some(Range {
-                    start: Position {
-                        line: 0,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: 0,
-                        character: 0,
-                    },
-                }),
-                text: "The quick brown fox".to_string(),
-            }])
-            .unwrap();
-
-        // 2. B receives it
+            .crdt
+            .oplog
+            .encode(diamond_types::list::encoding::EncodeOptions::default());
         peer_b.apply_remote_patch(&patch1);
+        peer_b.content_shadow = peer_b.content.clone();
 
-        // 3. Concurrent edits: A deletes "quick", B inserts "lazy " before "fox"
-        let patch_a = peer_a
-            .apply_local_changes(vec![TextDocumentContentChangeEvent {
-                range: Some(Range {
-                    start: Position {
-                        line: 0,
-                        character: 4,
-                    },
-                    end: Position {
-                        line: 0,
-                        character: 10,
-                    },
-                }),
-                text: "".to_string(),
-            }])
-            .unwrap();
+        // 2. Concurrent edits: A deletes "quick", B inserts "lazy " before "fox"
+        assert!(peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 4,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
+            }),
+            text: "".to_string(),
+        }]));
+        let patch_a = peer_a.get_patch_since(&peer_a.last_version);
+        peer_a.last_version = peer_a.crdt.oplog.local_version();
 
-        let patch_b = peer_b
-            .apply_local_changes(vec![TextDocumentContentChangeEvent {
-                range: Some(Range {
-                    start: Position {
-                        line: 0,
-                        character: 16,
-                    },
-                    end: Position {
-                        line: 0,
-                        character: 16,
-                    },
-                }),
-                text: "lazy ".to_string(),
-            }])
-            .unwrap();
+        assert!(peer_b.apply_local_changes(vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 16,
+                },
+                end: Position {
+                    line: 0,
+                    character: 16,
+                },
+            }),
+            text: "lazy ".to_string(),
+        }]));
+        let patch_b = peer_b.get_patch_since(&peer_b.last_version);
+        peer_b.last_version = peer_b.crdt.oplog.local_version();
 
-        // 4. Swap patches
+        // 3. Swap patches
         peer_a.apply_remote_patch(&patch_b);
         peer_b.apply_remote_patch(&patch_a);
 
-        // 5. Verify convergence
+        // 4. Verify convergence
         assert_eq!(peer_a.content.to_string(), peer_b.content.to_string());
         assert!(peer_a.content.to_string().contains("lazy"));
         assert!(!peer_a.content.to_string().contains("quick"));
