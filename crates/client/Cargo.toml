@@ -1,5 +1,5 @@
 [package]
-name = "JustSync"
+name = "just_sync"
 version = "0.1.0"
 edition = "2024"
 
@@ -22,6 +22,18 @@ ring = "0.17"
 hex = "0.4"
 proptest = "1.9.0"
 dissimilar = "1.0.10"
+chrono = "0.4.44"
+mockall = "0.14.0"
+async-trait = "0.1.89"
+spake2 = "0.4.0"
+chacha20poly1305 = "0.10.1"
+rand = "0.10.1"
+rustls-pki-types = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+server = { path = "../server" }
+rustls-pki-types = "1"

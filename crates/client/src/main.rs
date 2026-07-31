@@ -1,29 +1,26 @@
 use clap::{Arg, Command};
 use std::process::exit;
 use tokio::sync::mpsc;
+use tracing::{error, info};
 use uuid::Uuid;
 
-// Module definitions
-pub mod core;
-pub mod crypto;
-pub mod diff;
-pub mod fs;
-pub mod handler;
-pub mod logger;
-pub mod lsp;
-pub mod network;
-pub mod state;
-
-use crate::{
-    core::{Core, Event},
-    network::NetworkCommand,
+use just_sync::{
+    adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
+    internal::{
+        core::{Core, Event},
+        crypto::hash,
+        fs::FsOps,
+        handler::EditorAdapter,
+        network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
+    },
+    logger,
 };
 
 struct Context {
     mode: String,
-    remote_ip: Option<String>,
-    port: u16,
-    token: Option<String>,
+    remote_ip: String,
+    session_name: Option<String>,
+    key: String,
 }
 
 #[tokio::main]
@@ -33,84 +30,56 @@ pub async fn main() {
     let ctx = parse_cmd();
     let is_host = ctx.mode == "host";
 
-    // Logging init
-    crate::logger::init(is_host);
+    let _log_guard = logger::init(&ctx.mode);
+    info!("Starting JustSync in {} mode", ctx.mode);
 
-    // Prepare crypto
-    let (server_cert, server_key, active_token) = if is_host {
-        // Host - generate everything from scratch
-        let (cert, key, token_str) = crypto::generate_cert_and_token();
-
-        // Note: It's eprintln!() so it's automatically picked up by editors (as an lsp error)
-        eprintln!("---------------------------------------------------");
-        eprintln!("🔑 SECRET TOKEN: {}", token_str);
-        eprintln!("---------------------------------------------------");
-
-        (Some(cert), Some(key), token_str)
-    } else {
-        // peer - just take token from args
-        if ctx.token.is_none() {
-            eprintln!("Fehler: Als Peer musst du --token <TOKEN> angeben!");
-            exit(1);
-        }
-        (None, None, ctx.token.unwrap())
-    };
-
-    // --- CHANNEL SETUP ---
-
-    // Core Inbox
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
-    // Network Outbox
-    let (net_out_tx, net_out_rx) = mpsc::channel::<NetworkCommand>(100);
-    // Editor Outbox
-    let (editor_out_tx, editor_out_rx) = mpsc::channel(100);
+    let (net_tx, net_rx) = mpsc::channel::<NetworkCommand>(100);
+    let (editor_tx, editor_rx) = mpsc::channel(100);
 
-    // --- CORE ACTOR ---
     let agent_id = Uuid::new_v4().to_string();
-    let core = Core::new(agent_id, net_out_tx, editor_out_tx);
+
+    // Connect to relay and run network actor
+    let role = if is_host {
+        SessionRole::Host {}
+    } else {
+        SessionRole::Peer {
+            session_name: ctx.session_name.unwrap(),
+        }
+    };
+    let session = SessionCfg {
+        agent_id: agent_id.clone(),
+        key: hash(&ctx.key),
+        relay_addr: ctx.remote_ip.parse().unwrap(),
+        role,
+    };
+    tokio::spawn(QuicNetworkAdapter::connect_and_run(
+        session,
+        core_tx.clone(),
+        net_rx,
+    ));
 
     // Host: Scan files
+    let fs = FileSystem {};
     if is_host {
-        logger::log(">> [Host] Scanning workspace files...");
-        let files = crate::fs::scan_project_directory(".");
+        info!(">> Scanning workspace files...");
+        let files = fs.scan_project_directory(".");
         for (uri, content) in files {
             let _ = core_tx.send(Event::LoadFromDisk { uri, content }).await;
         }
     }
 
     // Spawn Core
-    tokio::spawn(async move {
-        core.run(core_rx).await;
-    });
+    let core = Core::new(agent_id, net_tx, editor_tx);
+    tokio::spawn(core.run(core_rx, is_host, fs));
 
-    // --- NETWORK ACTOR ---
-
-    let net_core_tx = core_tx.clone();
-
-    let net_mode = ctx.mode.clone();
-    let net_ip = ctx.remote_ip.clone();
-    let net_port = ctx.port;
-
-    tokio::spawn(async move {
-        crate::network::run(
-            net_mode,
-            net_ip,
-            net_port,
-            net_core_tx, // Send to Core
-            net_out_rx,  // Receive from Core
-            active_token,
-            server_cert,
-            server_key,
-        )
-        .await;
-    });
-
-    // --- EDITOR ADAPTER (Main Thread) ---
-    crate::handler::run(core_tx, editor_out_rx).await;
+    // Run editor adapter on main thread
+    let mut adapter = StdioAdapter::new(core_tx);
+    adapter.run(editor_rx).await;
 }
 
 fn parse_cmd() -> Context {
-    let matches = Command::new("JustSync")
+    let matches = Command::new("just_sync")
         .version("1.0")
         .about("A real-time, editor agnostic collaboration engine")
         .arg(
@@ -123,20 +92,19 @@ fn parse_cmd() -> Context {
             Arg::new("remote-ip")
                 .long("remote-ip")
                 .help("The remote ip address to connect to (required for peer)")
+                .required(true),
+        )
+        .arg(
+            Arg::new("name")
+                .long("session-name")
+                .help("The name of the session to join (retrieve from host)")
                 .required(false),
         )
         .arg(
-            Arg::new("token")
-                .long("token")
+            Arg::new("key")
+                .long("key")
                 .help("The security token (required for peer)")
-                .required(false),
-        )
-        .arg(
-            Arg::new("port")
-                .long("port")
-                .help("The port to listen on or connect to")
-                .default_value("4444")
-                .value_parser(clap::value_parser!(u16)),
+                .required(true),
         )
         .arg(
             Arg::new("stdio")
@@ -147,19 +115,25 @@ fn parse_cmd() -> Context {
         .get_matches();
 
     let mode = matches.get_one::<String>("mode").unwrap().clone();
-    let remote_ip = matches.get_one::<String>("remote-ip").cloned();
-    let token = matches.get_one::<String>("token").cloned();
-    let port = *matches.get_one::<u16>("port").unwrap();
+    let remote_ip = matches
+        .get_one::<String>("remote-ip")
+        .cloned()
+        .expect("Expected remote ip");
+    let session_name = matches.get_one::<String>("name").cloned();
+    let key = matches
+        .get_one::<String>("key")
+        .cloned()
+        .expect("Expected session key");
 
     if mode != "host" && mode != "peer" {
-        eprintln!("Invalid mode. Use --mode host or --mode peer.");
+        error!("Invalid mode. Use --mode host or --mode peer.");
         exit(1);
     }
 
     Context {
         mode,
         remote_ip,
-        port,
-        token,
+        session_name,
+        key,
     }
 }

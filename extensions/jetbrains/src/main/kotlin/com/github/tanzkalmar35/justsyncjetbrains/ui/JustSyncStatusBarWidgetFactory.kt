@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.wm.StatusBar
@@ -13,7 +14,9 @@ import com.intellij.openapi.wm.StatusBarWidgetFactory
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.Consumer
 import java.awt.event.MouseEvent
-import javax.swing.JOptionPane // Für Debugging
+import javax.swing.JOptionPane 
+
+private val LOG = Logger.getInstance(JustSyncStatusBarWidgetFactory::class.java)
 
 class JustSyncStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId() = "JustSyncStatusBar"
@@ -28,32 +31,29 @@ class JustSyncStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun canBeEnabledOn(statusBar: StatusBar) = true
 }
 
-// ÄNDERUNG: Wir nutzen jetzt TextPresentation statt MultipleTextValuesPresentation
 class JustSyncStatusBarWidget(private val project: Project) : StatusBarWidget, StatusBarWidget.TextPresentation {
 
     override fun ID() = "JustSyncStatusBar"
 
-    // Wir geben uns selbst als Presentation zurück
+    // Accesses self as presentation
     override fun getPresentation(): StatusBarWidget.WidgetPresentation = this
 
     override fun install(statusBar: StatusBar) {}
     override fun dispose() {}
 
-    // --- TextPresentation Methoden ---
+    // --- TextPresentation methods ---
 
     override fun getTooltipText() = "Click to control JustSync"
 
-    // ÄNDERUNG: getText() statt getSelectedValue()
     override fun getText(): String {
         val service = project.getService(JustSyncService::class.java)
         return if (service?.isRunning == true) "JustSync: ${service.modeLabel}" else "JustSync: Play"
     }
 
-    override fun getAlignment() = 0f // Linksbündig im Widget
+    override fun getAlignment() = 0f 
 
     override fun getClickConsumer(): Consumer<MouseEvent> {
         return Consumer { event ->
-            // Menü anzeigen
             showPopup(event)
         }
     }
@@ -62,7 +62,7 @@ class JustSyncStatusBarWidget(private val project: Project) : StatusBarWidget, S
         val service = project.getService(JustSyncService::class.java)
 
         if (service == null) {
-            // Fallback falls Service nicht lädt (sollte nicht passieren)
+            // Fallback
             JOptionPane.showMessageDialog(null, "Error: JustSync Service not found!")
             return
         }
@@ -77,16 +77,33 @@ class JustSyncStatusBarWidget(private val project: Project) : StatusBarWidget, S
                 }
             })
         } else {
-            group.add(object : AnAction("Host (Port 4444)") {
+            group.add(object : AnAction("Host Session") {
                 override fun actionPerformed(e: AnActionEvent) {
-                    service.startSession(listOf("--mode", "host", "--port", "4444"), "Host")
-                    updateWidget()
+                    val dialog = HostDialog()
+                    if (dialog.showAndGet()) {
+                        service.startSession(
+                            listOf("--mode", "host", "--remote-ip", dialog.relayAddress, "--key", dialog.password),
+                            "Host"
+                        )
+                        updateWidget()
+                    }
                 }
             })
-            group.add(object : AnAction("Join (127.0.0.1:4444)") {
+            group.add(object : AnAction("Join Session") {
                 override fun actionPerformed(e: AnActionEvent) {
-                    service.startSession(listOf("--mode", "peer", "--remote-ip", "127.0.0.1"), "Peer")
-                    updateWidget()
+                    val dialog = JoinDialog()
+                    if (dialog.showAndGet()) {
+                        service.startSession(
+                            listOf(
+                                "--mode", "peer",
+                                "--remote-ip", dialog.relayAddress,
+                                "--key", dialog.password,
+                                "--session-name", dialog.sessionName
+                            ),
+                            "Peer"
+                        )
+                        updateWidget()
+                    }
                 }
             })
         }
