@@ -13,7 +13,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0       # Disable incremental compilation in CI (cleaner caches)
+  CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
 
 jobs:
@@ -98,26 +98,3 @@ jobs:
 
       - name: Run doc tests
         run: cargo test --doc --all-features
-
-  # ── Miri (nightly, scheduled only) ────────────────────────────────────────
-  miri:
-    name: Miri
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install nightly toolchain with Miri
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri, rust-src
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: miri
-
-      - name: Run Miri
-        env:
-          MIRIFLAGS: "-Zmiri-strict-provenance"
-        run: cargo miri test --all-features

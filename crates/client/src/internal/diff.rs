@@ -2,9 +2,23 @@ use ropey::Rope;
 
 use crate::internal::lsp::{Position, Range, TextEdit};
 
+/// Calculates the edit operations needed to move from one state to another.
+///
+/// Given two `ropey::Rope` elements, this function calculates a list of text edits, that if
+/// applied in correct order on the first rope result in the first rope having the same content as
+/// the second one.
+///
+/// # Arguments
+///
+/// * `old` - The old state, eg the baseline to calculate edits upon.
+/// * `new` - The new state, eg the desired state of the old state.
+///
+/// # Returns
+///
+/// A list of `TextEdit` operations, that if applied to the `old` rope in order, result in it
+/// having the exact same content as `new`.
 #[must_use]
 pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
-    // Fast pointer comparison or deep comparison if pointers differ.
     if old == new {
         return Vec::new();
     }
@@ -22,7 +36,6 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
 
     // Suffix Scan (Optimization)
     // Find how many characters at the end are identical.
-    // strictly ensure the suffix does not overlap with the prefix we just found.
     let common_suffix_len = old
         .chars_at(len_old)
         .reversed()
@@ -40,7 +53,7 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     // If the middle of one side is empty, it's a simple insert/delete.
     // We don't need the expensive Diff algorithm for this.
 
-    // Case A: Pure Insertion
+    // Pure Insertion
     if start == old_end && start != new_end {
         let inserted_text = new.slice(start..new_end).to_string();
         let pos = offset_to_position(old, start);
@@ -54,7 +67,7 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
         }];
     }
 
-    // Case B: Pure Deletion
+    // Pure Deletion
     if start != old_end && start == new_end {
         return vec![TextEdit {
             range: Range {
@@ -86,8 +99,18 @@ pub fn calculate_edits(old: &Rope, new: &Rope) -> Vec<TextEdit> {
     edits
 }
 
+/// Calculates the position inside of a document content string, based on a given char offset.
+///
+/// # Arguments
+///
+/// * `rope` - The content to calculate the position of the offset in.
+/// * `char_idx` - The offset to use for position calculation.
+///
+/// # Returns
+///
+/// The calculated position, including row and column.
 fn offset_to_position(rope: &Rope, char_idx: usize) -> Position {
-    // Ropey handles this log(N)
+    // Ropey handles this in log(n)
     let line_idx = rope.char_to_line(char_idx);
     let line_start_char = rope.line_to_char(line_idx);
     let col = char_idx - line_start_char;

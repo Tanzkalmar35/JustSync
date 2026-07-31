@@ -14,6 +14,7 @@ use tracing::{debug, error, info};
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// Signals an event that should be ignored
     Ignoring,
 
     /// The user typed something in the editor (Stdin)
@@ -45,11 +46,13 @@ pub enum Event {
         uri: String,
     },
 
+    /// The user moved the cursor
     LocalCursorChange {
         uri: String,
         position: Position,
     },
 
+    /// A remote peer moved the cursor
     RemoteCursorChange {
         agent_id: String,
         uri: String,
@@ -82,6 +85,7 @@ pub struct Core {
     network_tx: mpsc::Sender<NetworkCommand>, // Send patches to peers
     editor_tx: mpsc::Sender<EditorCommand>,   // Send edits to editor
 
+    // Keeps track of "dirty" files, eg files that are tagged for sync
     dirty_files: HashSet<String>,
 }
 
@@ -99,7 +103,19 @@ impl Core {
         }
     }
 
-    /// The Main Loop: Process one event at a time.
+    /// Core's main event loop. The singular passage for events coming from either network or local
+    /// editors.
+    ///
+    /// This event loop orchestrates the whole application. Anything that happens anywhere, will at
+    /// some point pass through this function.
+    ///
+    /// Also, this function flushes all "dirty" files, every 5ms.
+    ///
+    /// # Arguments
+    ///
+    /// * `rx` - The channel to pull messages from.
+    /// * `is_host` - Whether the localhost peer is the hosting peer of the session.
+    /// * `fs` - The filesystem adapter to use.
     pub async fn run(mut self, mut rx: mpsc::Receiver<Event>, is_host: bool, fs: impl FsOps) {
         let mut flush_timer = tokio::time::interval(Duration::from_millis(5));
 
@@ -121,7 +137,6 @@ impl Core {
                         }
                         Event::LoadFromDisk { uri, content } => {
                             debug!("[Core] Loading workspace from disk");
-                            // Just update state, don't load into editor
                             self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                         }
                         Event::ClientDidOpen { uri, content } => {
@@ -210,6 +225,13 @@ impl Core {
         }
     }
 
+    /// Handles local changes made to a document.
+    ///
+    /// # Arguments
+    ///
+    /// * `uri` - The uri pointing to the changed document.
+    /// * `changes` - The changes that were made.
+    /// * `is_host` - Whether the localhost peer is hosting peer.
     async fn handle_local_change(
         &mut self,
         uri: String,
@@ -219,6 +241,7 @@ impl Core {
         let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
 
         if !doc.apply_local_changes(changes) {
+            // Change to apply was likely an echo or a no-op
             return;
         }
 
@@ -235,39 +258,13 @@ impl Core {
         }
     }
 
-    // async fn handle_local_change(
-    //     &mut self,
-    //     uri: String,
-    //     changes: Vec<TextDocumentContentChangeEvent>,
-    //     is_host: bool,
-    // ) {
-    //     // Get the document
-    //     let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
-    //
-    //     // Apply logic (The logic inside Document should return the binary patch if effective)
-    //     if !doc.apply_local_changes(changes.clone()) {
-    //         return;
-    //     }
-    //
-    //     let current_version = doc.crdt.oplog.local_version().clone();
-    //
-    //     if current_version != doc.last_version {
-    //         let patch = doc.get_patch_since(&doc.last_version);
-    //
-    //         if !patch.is_empty() {
-    //             let _ = self
-    //                 .network_tx
-    //                 .send(NetworkCommand::BroadcastPatch {
-    //                     uri: uri.clone(),
-    //                     patch,
-    //                 })
-    //                 .await;
-    //         }
-    //
-    //         doc.last_version = current_version
-    //     }
-    // }
-
+    /// Handles incoming changes, a remote peer made and shared with us.
+    ///
+    /// # Arguments
+    ///
+    /// * `uri` - The uri of the changed document.
+    /// * `patch` - The patch of changes to the document.
+    /// * `is_host` - Whether the localhost peer is hosting peer.
     fn handle_remote_patch(&mut self, uri: String, patch: &[u8], is_host: bool) {
         let is_open = self.workspace.is_open(&uri);
         let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
@@ -282,6 +279,11 @@ impl Core {
         }
     }
 
+    /// Drains the list of "dirty" documents, eg syncing their state with the editor.
+    ///
+    /// # Arguments
+    ///
+    /// * `is_host` - Whether the localhost peer is hosting peer.
     async fn flush_dirty_files(&mut self, is_host: bool) {
         for uri in self.dirty_files.drain().collect::<Vec<_>>() {
             let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
@@ -300,28 +302,3 @@ impl Core {
         }
     }
 }
-
-//     async fn flush_dirty_files(&mut self, is_host: bool) {
-//         for uri in self.dirty_files.drain().collect::<Vec<_>>() {
-//             let doc = self.workspace.get_or_create_empty(uri.as_str(), is_host);
-//
-//             let old_rope = self
-//                 .last_flushed_ropes
-//                 .entry(uri.clone())
-//                 .or_insert_with(|| Rope::from_str(""));
-//             let edits = diff::calculate_edits(old_rope, &doc.content);
-//
-//             if !edits.is_empty() {
-//                 *old_rope = doc.content.clone();
-//
-//                 let _ = self
-//                     .editor_tx
-//                     .send(EditorCommand::ApplyEdits {
-//                         uri: uri.clone(),
-//                         edits,
-//                     })
-//                     .await;
-//             }
-//         }
-//     }
-// }

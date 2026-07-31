@@ -77,6 +77,17 @@ pub trait NetworkAdapter: Send {
     );
 }
 
+/// Handles translating a message from the network to a message the just_sync core can interpret.
+///
+/// # Arguments
+///
+/// * `cmd` - The cmd to translate.
+/// * `agent_id` - The agent_id of the peer that made the change.
+/// * `is_host` - Whether the peer that made the change is the hosting peer.
+///
+/// # Returns
+///
+/// The `Event` translation result.
 #[must_use]
 pub fn into_internal(cmd: WireMessage, agent_id: &str, is_host: bool) -> Event {
     match cmd {
@@ -110,18 +121,26 @@ pub fn into_internal(cmd: WireMessage, agent_id: &str, is_host: bool) -> Event {
     }
 }
 
+/// Translates a message from the insides of just_sync into a message that's ready for network
+/// sync.
+///
+/// # Arguments
+///
+/// * `cmd` - The internal message to translate to a network message.
+///
+/// # Returns
+///
+/// The `WireMessage` translation result.
 #[must_use]
 pub fn into_external(cmd: NetworkCommand) -> WireMessage {
     match cmd {
-        NetworkCommand::BroadcastCursor { uri, position } => WireMessage::Cursor {
-            uri,
-            position,
-        },
+        NetworkCommand::BroadcastCursor { uri, position } => WireMessage::Cursor { uri, position },
         NetworkCommand::BroadcastPatch { uri, patch } => WireMessage::Patch { uri, data: patch },
         NetworkCommand::SendFullSyncResponse { files } => WireMessage::FullSyncResponse { files },
     }
 }
 
+/// Builds the transport configuration for quinn.
 #[must_use]
 pub fn make_transport_config() -> TransportConfig {
     let mut transport_config = TransportConfig::default();
@@ -141,6 +160,10 @@ pub fn make_transport_config() -> TransportConfig {
 /// # Panics
 ///
 /// * If the crypto config couldn't be applied to the `QuicClientConfig`
+///
+/// # Returns
+///
+/// The quinn ClientConfig ready for use.
 #[must_use]
 pub fn configure_client() -> ClientConfig {
     // Use own verifier

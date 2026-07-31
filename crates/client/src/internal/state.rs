@@ -54,14 +54,17 @@ impl Workspace {
         results
     }
 
+    /// Marks a document as currently open
     pub fn mark_open(&mut self, uri: String) {
         self.open_files.insert(uri);
     }
 
+    /// Marks a document as currently closed
     pub fn mark_closed(&mut self, uri: &str) {
         self.open_files.remove(uri);
     }
 
+    /// Checks if a document with the given uri is currently open
     #[must_use]
     pub fn is_open(&self, uri: &str) -> bool {
         self.open_files.contains(uri)
@@ -72,10 +75,13 @@ impl Workspace {
 /// Encapsulates the synchronization logic ("The Brain of the File").
 #[must_use]
 pub struct Document {
+    /// The preliminary expected content of the document
     pub content: Rope,
 
+    /// The conservative actual content of the document
     pub content_shadow: Rope,
 
+    /// The latest synchronized document version
     pub last_version: LocalVersion,
 
     /// The "Truth" - The mathematical CRDT history.
@@ -108,8 +114,15 @@ impl Document {
     }
 
     /// Processes changes from the editor.
-    /// Returns: `Some(Vec<u8>)` (the patch bytes) if the network needs to be notified.
-    /// Returns: `None` if the change was an echo or no-op.
+    ///
+    /// # Arguments
+    ///
+    /// * `changes` - A list of changes to apply to this document.
+    ///
+    /// # Returns
+    ///
+    /// Whether changes were applied to this doc. Therefore false if the changes turned out to be
+    /// an echo or a no-op.
     pub fn apply_local_changes(&mut self, changes: Vec<TextDocumentContentChangeEvent>) -> bool {
         let mut new_content = self.content_shadow.clone();
         for change in &changes {
@@ -119,7 +132,7 @@ impl Document {
         // Echo
         if new_content == self.content {
             self.content_shadow = new_content;
-            return false
+            return false;
         }
 
         let user_edits = diff::calculate_edits(&self.content, &new_content);
@@ -139,58 +152,22 @@ impl Document {
             }
         }
 
-        // 5. Update shadow to the editor's actual reported view
         self.content_shadow = new_content;
-
-        // 6. Sync content with the CRDT
         self.content = Rope::from_str(&self.crdt.branch.content().to_string());
 
         crdt_changed
     }
 
-    // pub fn apply_local_changes(&mut self, changes: Vec<TextDocumentContentChangeEvent>) -> bool {
-    //     let mut patch_generated = false;
-    //
-    //     for change in changes {
-    //         // Calculate change offsets
-    //         if let Some(range) = &change.range {
-    //             let (start, end) = Self::get_offsets_from_rope(&self.content_prelim, range);
-    //             let agent = self.crdt.get_or_create_agent_id(&self.agent_id);
-    //
-    //             // Apply changes
-    //             if start < end {
-    //                 self.crdt.delete(agent, start..end);
-    //             }
-    //             if !change.text.is_empty() {
-    //                 self.crdt.insert(agent, start, &change.text);
-    //             }
-    //         } else {
-    //             // Full document replacement
-    //             let agent = self.crdt.get_or_create_agent_id(&self.agent_id);
-    //
-    //             // Delete the entire current CRDT content
-    //             let current_len = self.crdt.branch.len();
-    //             if current_len > 0 {
-    //                 self.crdt.delete(agent, 0..current_len);
-    //             }
-    //
-    //             // Insert the new content at position 0
-    //             if !change.text.is_empty() {
-    //                 self.crdt.insert(agent, 0, &change.text);
-    //             }
-    //         }
-    //
-    //         // Update editor view (rope)
-    //         Self::apply_change_to_rope(&mut self.content_prelim, &change);
-    //
-    //         patch_generated = true;
-    //     }
-    //
-    //     patch_generated
-    // }
-
     /// Processes a patch from a peer.
-    /// Returns: `Some(Vec<TextEdit>)` if the editor needs to be updated.
+    ///
+    /// # Arguments
+    ///
+    /// * `patch` - The patch to apply on this doc.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(Vec<TextEdit>)` if the editor needs to be updated.
+    /// * `None` if not.
     pub fn apply_remote_patch(&mut self, patch: &[u8]) -> Option<Vec<TextEdit>> {
         let old_shadow = self.content_shadow.clone();
 
@@ -216,44 +193,7 @@ impl Document {
         }
     }
 
-    // pub fn apply_remote_patch(&mut self, patch: &[u8]) -> Option<Vec<TextEdit>> {
-    //     let old_rope = self.content.clone();
-    //
-    //     // Merge CRDT Patch into Oplog
-    //     let merge_result = self.crdt.oplog.decode_and_add(patch);
-    //
-    //     match merge_result {
-    //         Ok(_) => {
-    //             // Fast-forward the current branch state
-    //             // Without this, 'branch.content()' returns empty string,
-    //             // causing the system to think it needs to re-insert everything.
-    //             self.crdt
-    //                 .branch
-    //                 .merge(&self.crdt.oplog, self.crdt.oplog.local_version_ref());
-    //
-    //             // Reconstruct text
-    //             let new_text = self.crdt.branch.content().to_string();
-    //             let new_rope = Rope::from_str(&new_text);
-    //             self.content = new_rope.clone();
-    //
-    //             let edits = diff::calculate_edits(&old_rope, &new_rope);
-    //             debug!("[Core] Calculated edits: {:?}", edits);
-    //
-    //             self.last_version = self.crdt.oplog.local_version();
-    //
-    //             if edits.is_empty() {
-    //                 None
-    //             } else {
-    //                 Some(edits)
-    //             }
-    //         }
-    //         Err(e) => {
-    //             error!("[Core] Failed to merge: {:?}", e);
-    //             None
-    //         }
-    //     }
-    // }
-
+    /// Returns the crdt history, starting at a given time
     pub fn get_patch_since(&self, since: &[Time]) -> Vec<u8> {
         self.crdt.oplog.encode_from(EncodeOptions::default(), since)
     }
@@ -266,7 +206,7 @@ impl Document {
     fn get_offsets_from_rope(rope: &Rope, range: &Range) -> (usize, usize) {
         let len_lines = rope.len_lines();
 
-        // Safety: Clamp line index
+        // Clamp line index
         let start_line = range.start.line.min(len_lines.saturating_sub(1));
         let end_line = range.end.line.min(len_lines.saturating_sub(1));
 
@@ -291,7 +231,7 @@ impl Document {
                 rope.insert(s, &change.text);
             }
         } else {
-            // Full text replacement (uncommon in incremental sync but possible)
+            // Full text replacement
             *rope = Rope::from_str(&change.text);
         }
     }
@@ -594,19 +534,21 @@ mod tests {
         let mut peer_b = Document::new("", "b", false);
 
         // 1. A types something
-        assert!(peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: 0,
-                    character: 0,
-                },
-            }),
-            text: "The quick brown fox".to_string(),
-        }]));
+        assert!(
+            peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                }),
+                text: "The quick brown fox".to_string(),
+            }])
+        );
 
         let patch1 = peer_a
             .crdt
@@ -616,35 +558,39 @@ mod tests {
         peer_b.content_shadow = peer_b.content.clone();
 
         // 2. Concurrent edits: A deletes "quick", B inserts "lazy " before "fox"
-        assert!(peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 4,
-                },
-                end: Position {
-                    line: 0,
-                    character: 10,
-                },
-            }),
-            text: "".to_string(),
-        }]));
+        assert!(
+            peer_a.apply_local_changes(vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 4,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 10,
+                    },
+                }),
+                text: "".to_string(),
+            }])
+        );
         let patch_a = peer_a.get_patch_since(&peer_a.last_version);
         peer_a.last_version = peer_a.crdt.oplog.local_version();
 
-        assert!(peer_b.apply_local_changes(vec![TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position {
-                    line: 0,
-                    character: 16,
-                },
-                end: Position {
-                    line: 0,
-                    character: 16,
-                },
-            }),
-            text: "lazy ".to_string(),
-        }]));
+        assert!(
+            peer_b.apply_local_changes(vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 0,
+                        character: 16,
+                    },
+                    end: Position {
+                        line: 0,
+                        character: 16,
+                    },
+                }),
+                text: "lazy ".to_string(),
+            }])
+        );
         let patch_b = peer_b.get_patch_since(&peer_b.last_version);
         peer_b.last_version = peer_b.crdt.oplog.local_version();
 

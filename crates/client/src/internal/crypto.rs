@@ -2,6 +2,15 @@ use ring::digest::{SHA256, digest};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
+/// Calculates the SHA256 hash of the given key.
+///
+/// # Arguments
+///
+/// * `key` - The key to calculate the hash of.
+///
+/// # Returns
+///
+/// The calculated SHA256 hash, hex encoded.
 #[must_use]
 pub fn hash(key: &str) -> String {
     let hash = digest(&SHA256, key.as_bytes());
@@ -10,7 +19,7 @@ pub fn hash(key: &str) -> String {
 
 /// As this architecture works on zero trust using E2EE and SPAKE2, there's no need to verify any
 /// certs. Therefore we just accept all traffic without checking, because it's all just encrypted
-/// gibberish anyways.
+/// gibberish anyways (apart from setup traffic).
 
 #[derive(Debug)]
 pub struct NoVerifier;

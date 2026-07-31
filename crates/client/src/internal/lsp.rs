@@ -93,16 +93,6 @@ pub struct InitializeParams {
     pub root_uri: Option<String>,
 }
 
-// #[derive(Debug, Serialize)]
-// pub struct InitializeResult {
-//     pub capabilities: ServerCapabilities,
-// }
-
-// #[derive(Debug, Serialize)]
-// pub struct ServerCapabilities {
-//     pub text_doc_sync: i32, // 1 = full, 2 = incremental
-// }
-
 /// Waits for and reads a new message from the given reader
 ///
 /// # Arguments
