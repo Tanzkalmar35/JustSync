@@ -12,6 +12,9 @@ It utilizes **CRDTs (Conflict-free Replicated Data Types)** for mathematical con
 
 ---
 
+> **Disclaimer:** As this is a sensitive topic, I want to be completely transparent about the role of AI in this project.
+This project is **not** vibe-coded. While AI is used for planning mostly, and somewhat integrated into the testing loop,
+the actual business logic is **not** AI written, but instead by me!
 
 https://github.com/user-attachments/assets/9f55f365-05b3-486a-89fd-d1e441ab1f36
 
