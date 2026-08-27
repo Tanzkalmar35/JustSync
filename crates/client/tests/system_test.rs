@@ -67,7 +67,8 @@ async fn test_full_system_sync() {
                     let (mut send, mut recv) = connection.accept_bi().await.unwrap();
                     let mut buf = vec![0u8; 1024];
                     let n = recv.read(&mut buf).await.unwrap().unwrap_or(0);
-                    let msg: just_sync_server::ControlMessage = serde_json::from_slice(&buf[..n]).unwrap();
+                    let msg: just_sync_server::ControlMessage =
+                        serde_json::from_slice(&buf[..n]).unwrap();
 
                     match msg {
                         just_sync_server::ControlMessage::Register { key: _ } => {
