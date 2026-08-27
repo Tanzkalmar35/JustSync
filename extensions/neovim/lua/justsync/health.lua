@@ -4,7 +4,7 @@ function M.check()
   vim.health.start("justsync")
 
   local config = require("justsync.config").options
-  local binary = config.cmd_path or "just_sync"
+  local binary = config.cmd_path or "just_sync_client"
 
   if vim.fn.executable(binary) == 1 then
     vim.health.ok("Binary found: " .. binary)

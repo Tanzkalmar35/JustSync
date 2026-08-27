@@ -77,7 +77,7 @@ pub trait NetworkAdapter: Send {
     );
 }
 
-/// Handles translating a message from the network to a message the just_sync core can interpret.
+/// Handles translating a message from the network to a message the just_sync_client core can interpret.
 ///
 /// # Arguments
 ///
@@ -121,7 +121,7 @@ pub fn into_internal(cmd: WireMessage, agent_id: &str, is_host: bool) -> Event {
     }
 }
 
-/// Translates a message from the insides of just_sync into a message that's ready for network
+/// Translates a message from the insides of just_sync_client into a message that's ready for network
 /// sync.
 ///
 /// # Arguments

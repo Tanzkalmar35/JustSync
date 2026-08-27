@@ -50,20 +50,20 @@ class JustSyncLspDescriptor(project: Project, private val args: List<String>) : 
     override fun createCommandLine(): GeneralCommandLine {
         println("JustSync: createCommandLine called with args: $args")
         
-        var binaryPath = "just_sync"
+        var binaryPath = "just_sync_client"
         
         // Try to find binary in project target directory or common locations
         val projectPath = project.basePath
         val possiblePaths = mutableListOf<String>()
         if (projectPath != null) {
             possiblePaths.addAll(listOf(
-                "target/release/just_sync",
-                "target/debug/just_sync",
-                "bin/just_sync"
+                "target/release/just_sync_client",
+                "target/debug/just_sync_client",
+                "bin/just_sync_client"
             ).map { java.io.File(projectPath, it).absolutePath })
         }
-        possiblePaths.add("/usr/local/bin/just_sync")
-        possiblePaths.add("/usr/bin/just_sync")
+        possiblePaths.add("/usr/local/bin/just_sync_client")
+        possiblePaths.add("/usr/bin/just_sync_client")
 
         for (path in possiblePaths) {
             val file = java.io.File(path)
@@ -74,8 +74,8 @@ class JustSyncLspDescriptor(project: Project, private val args: List<String>) : 
             }
         }
 
-        if (binaryPath == "just_sync") {
-            println("JustSync: WARN - Could not find just_sync binary in known locations. Falling back to system PATH.")
+        if (binaryPath == "just_sync_client") {
+            println("JustSync: WARN - Could not find just_sync_client binary in known locations. Falling back to system PATH.")
         }
 
         return GeneralCommandLine().apply {

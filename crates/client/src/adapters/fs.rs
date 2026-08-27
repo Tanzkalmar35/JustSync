@@ -29,7 +29,7 @@ impl FileSystem {
     /// ```ignore
     /// use std::fs;
     /// use std::path::Path;
-    /// use just_sync::adapters::fs::FileSystem;
+    /// use just_sync_client::adapters::fs::FileSystem;
     ///
     /// let root = Path::new("/my/project");
     /// let mut results = Vec::new();

@@ -44,7 +44,7 @@ function M.launch_client(args, mode_name)
     for _, arg in ipairs(args) do table.insert(cmd, arg) end
 
     vim.lsp.start({
-        name         = "just_sync",
+        name         = "just_sync_client",
         cmd          = cmd,
         root_dir     = root_dir,
         capabilities = capabilities,
@@ -76,7 +76,7 @@ function M.launch_client(args, mode_name)
             group    = grp,
             pattern  = "*",
             callback = function(ev)
-                local clients = vim.lsp.get_clients({ name = "just_sync" })
+                local clients = vim.lsp.get_clients({ name = "just_sync_client" })
                 if #clients > 0 then
                     vim.lsp.buf_attach_client(ev.buf, clients[1].id)
                 end

@@ -2,12 +2,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use just_sync::adapters::network::QuicNetworkAdapter;
-use just_sync::internal::core::{Core, Event};
-use just_sync::internal::fs::FsOps;
-use just_sync::internal::handler::EditorCommand;
-use just_sync::internal::lsp::TextDocumentContentChangeEvent;
-use just_sync::internal::network::{NetworkAdapter, SessionCfg, SessionRole};
+use just_sync_client::adapters::network::QuicNetworkAdapter;
+use just_sync_client::internal::core::{Core, Event};
+use just_sync_client::internal::fs::FsOps;
+use just_sync_client::internal::handler::EditorCommand;
+use just_sync_client::internal::lsp::TextDocumentContentChangeEvent;
+use just_sync_client::internal::network::{NetworkAdapter, SessionCfg, SessionRole};
 
 #[derive(Clone)]
 struct MockFs;
@@ -25,7 +25,7 @@ impl FsOps for MockFs {
 async fn test_full_system_sync() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // 1. Start Relay Server in background
+    // Start Relay Server in background
     let relay_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (addr_tx, addr_rx) = tokio::sync::oneshot::channel();
 
@@ -106,7 +106,7 @@ async fn test_full_system_sync() {
 
     let actual_relay_addr = addr_rx.await.unwrap();
 
-    // 2. Setup Host Client
+    // Setup Host Client
     let host_id = "host-client".to_string();
     let (host_net_tx, host_net_rx) = mpsc::channel(100);
     let (host_editor_tx, _host_editor_rx) = mpsc::channel::<EditorCommand>(100);
@@ -153,7 +153,7 @@ async fn test_full_system_sync() {
 
     let session_name = proxy_handle.await.unwrap();
 
-    // 3. Setup Peer Client
+    // Setup Peer Client
     let peer_id = "peer-client".to_string();
     let (peer_net_tx, peer_net_rx) = mpsc::channel(100);
     let (peer_editor_tx, _peer_editor_rx) = mpsc::channel::<EditorCommand>(100);
@@ -193,17 +193,16 @@ async fn test_full_system_sync() {
         false
     });
 
-    // 4. Verify End-to-End Flow
     // Host types "Hello"
     let host_change = Event::LocalChange {
         uri: "test.txt".to_string(),
         changes: vec![TextDocumentContentChangeEvent {
-            range: Some(just_sync::internal::lsp::Range {
-                start: just_sync::internal::lsp::Position {
+            range: Some(just_sync_client::internal::lsp::Range {
+                start: just_sync_client::internal::lsp::Position {
                     line: 0,
                     character: 0,
                 },
-                end: just_sync::internal::lsp::Position {
+                end: just_sync_client::internal::lsp::Position {
                     line: 0,
                     character: 0,
                 },

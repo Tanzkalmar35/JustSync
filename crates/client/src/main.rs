@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use just_sync::{
+use just_sync_client::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
     internal::{
         core::{Core, Event},
@@ -79,7 +79,7 @@ pub async fn main() {
 }
 
 fn parse_cmd() -> Context {
-    let matches = Command::new("just_sync")
+    let matches = Command::new("just_sync_client")
         .version("1.0")
         .about("A real-time, editor agnostic collaboration engine")
         .arg(

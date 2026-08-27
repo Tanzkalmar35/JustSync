@@ -1,5 +1,5 @@
 [package]
-name = "just_sync"
+name = "just_sync_client"
 version = "0.1.0"
 edition = "2024"
 
@@ -35,5 +35,5 @@ tracing-appender = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
-server = { path = "../server" }
+just_sync_server = { path = "../server" }
 rustls-pki-types = "1"

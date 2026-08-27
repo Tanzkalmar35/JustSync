@@ -14,7 +14,7 @@ let selectionChangeListener: vscode.Disposable | undefined;
 // Map of agent_id -> { uri: string, range: vscode.Range }
 const remoteCursors = new Map<string, { uri: string, range: vscode.Range }>();
 
-const SERVER_PATH = "just_sync";
+const SERVER_PATH = "just_sync_client";
 
 interface RemoteCursorParams {
     agent_id: string;

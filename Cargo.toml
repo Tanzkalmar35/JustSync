@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "crates/*"
+    "crates/client",
+    "crates/server"
 ]
 
 [profile.dev]

@@ -321,7 +321,7 @@ impl EditorAdapter for StdioAdapter {
     ///
     /// # Usage Example
     /// ```ignore
-    /// use crate::just_sync::adapters::handler::StdioAdapter;
+    /// use crate::just_sync_client::adapters::handler::StdioAdapter;
     /// use tokio::sync::mpsc;
     ///
     /// #[tokio::main]
