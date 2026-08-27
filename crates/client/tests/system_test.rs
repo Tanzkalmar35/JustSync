@@ -56,7 +56,7 @@ async fn test_full_system_sync() {
         let actual_addr = endpoint.local_addr().unwrap();
         let _ = addr_tx.send(actual_addr);
 
-        let server = server::server::Server::setup();
+        let server = just_sync_server::server::Server::setup();
         while let Some(incoming) = endpoint.accept().await {
             let server_ref = server.clone();
             tokio::spawn(async move {
@@ -67,17 +67,17 @@ async fn test_full_system_sync() {
                     let (mut send, mut recv) = connection.accept_bi().await.unwrap();
                     let mut buf = vec![0u8; 1024];
                     let n = recv.read(&mut buf).await.unwrap().unwrap_or(0);
-                    let msg: server::ControlMessage = serde_json::from_slice(&buf[..n]).unwrap();
+                    let msg: just_sync_server::ControlMessage = serde_json::from_slice(&buf[..n]).unwrap();
 
                     match msg {
-                        server::ControlMessage::Register { key: _ } => {
-                            let session = server::session::Session::new(
+                        just_sync_server::ControlMessage::Register { key: _ } => {
+                            let session = just_sync_server::session::Session::new(
                                 std::sync::Arc::new(connection.clone()),
                                 "test-key".to_string(),
                             );
                             let session_name = session.name.clone();
                             server_ref.register_session(session);
-                            let ans = server::ControlMessage::SessionCreated {
+                            let ans = just_sync_server::ControlMessage::SessionCreated {
                                 status: "ok".to_string(),
                                 name: session_name,
                             };
@@ -86,7 +86,7 @@ async fn test_full_system_sync() {
                                 .unwrap();
                             send.finish().unwrap();
                         }
-                        server::ControlMessage::Join { name, key: _ } => {
+                        just_sync_server::ControlMessage::Join { name, key: _ } => {
                             if let Some(mut session) = server_ref.find_session(&name) {
                                 let _ = session
                                     .join(

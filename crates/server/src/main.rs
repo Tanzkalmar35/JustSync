@@ -1,8 +1,8 @@
 use clap::Parser;
+use just_sync_server::server::Server;
+use just_sync_server::session::Session;
 use quinn::{Connection, Endpoint, ServerConfig, VarInt};
 use serde::{Deserialize, Serialize};
-use server::server::Server;
-use server::session::Session;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
