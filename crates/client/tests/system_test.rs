@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::time::Duration;
+use just_sync_client::internal::relay_endpoint::RelayEndpoint;
 use tokio::sync::mpsc;
 
 use just_sync_client::adapters::network::QuicNetworkAdapter;
@@ -105,7 +106,7 @@ async fn test_full_system_sync() {
         }
     });
 
-    let actual_relay_addr = addr_rx.await.unwrap();
+    let actual_relay_addr = RelayEndpoint::parse(&addr_rx.await.unwrap().to_string(), 5000).unwrap();
 
     // Setup Host Client
     let host_id = "host-client".to_string();
@@ -120,7 +121,7 @@ async fn test_full_system_sync() {
     let host_session = SessionCfg {
         agent_id: host_id.clone(),
         key: "test-key".to_string(),
-        relay_addr: actual_relay_addr,
+        relay_addr: actual_relay_addr.clone(),
         role: SessionRole::Host {},
     };
 

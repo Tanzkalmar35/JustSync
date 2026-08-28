@@ -5,4 +5,5 @@ pub mod fs;
 pub mod handler;
 pub mod lsp;
 pub mod network;
+pub mod relay_endpoint;
 pub mod state;

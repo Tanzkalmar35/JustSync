@@ -620,11 +620,16 @@ impl NetworkAdapter for QuicNetworkAdapter {
     ///
     /// * `core_tx` - Net -> Core stream.
     /// * `net_rx` - Core -> Net stream.
+    ///
+    /// # Errors
+    ///
+    /// * If no connection to the relay serer could be obtained.
+    /// * If the peer event loop fails.
     async fn connect_and_run(
         session: internal::network::SessionCfg,
         core_tx: mpsc::Sender<Event>,
         net_rx: mpsc::Receiver<crate::internal::network::NetworkCommand>,
-    ) {
+    ) -> anyhow::Result<()> {
         let adapter = Self {
             session: session.clone(),
             peers: Arc::new(Mutex::new(HashMap::new())),
@@ -632,14 +637,22 @@ impl NetworkAdapter for QuicNetworkAdapter {
             core_recv: Mutex::new(net_rx),
         };
 
-        let conn = match adapter.connect(session.relay_addr).await {
-            Ok(conn) => conn,
-            Err(e) => panic!("{}", e),
-        };
+        let socket_addr = session.relay_addr.resolve().await?;
+        info!(
+            "Connecting to relay at {} (IP: {})",
+            session.relay_addr.host, socket_addr
+        );
+
+        let conn = adapter
+            .connect(socket_addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("Unable to obtain connection to relay server: {}", e))?;
 
         Arc::new(adapter)
             .run_peer(conn)
             .await
-            .expect("Failed to run peer network adapter");
+            .map_err(|e| anyhow::anyhow!("Unable to run peer event loop: {}", e))?;
+
+        Ok(())
     }
 }

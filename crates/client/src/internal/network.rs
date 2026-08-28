@@ -1,11 +1,13 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use quinn::{ClientConfig, TransportConfig, VarInt, crypto::rustls::QuicClientConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use crate::internal::{core::Event, crypto::NoVerifier, lsp::Position};
+use crate::internal::{
+    core::Event, crypto::NoVerifier, lsp::Position, relay_endpoint::RelayEndpoint,
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WireMessage {
@@ -58,7 +60,7 @@ pub enum ControlMessage {
 pub struct SessionCfg {
     pub agent_id: String,
     pub key: String,
-    pub relay_addr: SocketAddr,
+    pub relay_addr: RelayEndpoint,
     pub role: SessionRole,
 }
 
@@ -74,7 +76,7 @@ pub trait NetworkAdapter: Send {
         session: SessionCfg,
         core_tx: mpsc::Sender<Event>,
         net_rx: mpsc::Receiver<NetworkCommand>,
-    );
+    ) -> anyhow::Result<()>;
 }
 
 /// Handles translating a message from the network to a message the just_sync_client core can interpret.

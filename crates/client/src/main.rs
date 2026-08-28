@@ -12,6 +12,7 @@ use just_sync_client::{
         fs::FsOps,
         handler::EditorAdapter,
         network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
+        relay_endpoint::RelayEndpoint,
     },
     logger,
 };
@@ -50,23 +51,32 @@ pub async fn main() {
     let session = SessionCfg {
         agent_id: agent_id.clone(),
         key: hash(&ctx.key),
-        relay_addr: ctx.remote_ip.parse().unwrap(),
+        relay_addr: RelayEndpoint::parse(&ctx.remote_ip, 5000)
+            .expect("Invalid remote endpoint provided"),
         role,
     };
-    tokio::spawn(QuicNetworkAdapter::connect_and_run(
-        session,
-        core_tx.clone(),
-        net_rx,
-    ));
+    let net_to_core_tx = core_tx.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = QuicNetworkAdapter::connect_and_run(session, net_to_core_tx, net_rx).await {
+            error!("Network loop panicked: {}", e);
+            std::process::exit(1);
+        }
+    });
 
     // Host: Scan files
     let fs = FileSystem {};
     if is_host {
         info!(">> Scanning workspace files...");
+
         let files = fs.scan_project_directory(".");
         for (uri, content) in files {
-            let _ = core_tx.send(Event::LoadFromDisk { uri, content }).await;
+            if let Err(e) = core_tx.send(Event::LoadFromDisk { uri, content }).await {
+                error!("{}", e)
+            }
         }
+
+        info!(">> File scanning complete!")
     }
 
     // Spawn Core
@@ -126,7 +136,8 @@ fn parse_cmd() -> Context {
         .expect("Expected session key");
 
     if mode != "host" && mode != "peer" {
-        error!("Invalid mode. Use --mode host or --mode peer.");
+        error!("Invalid mode selected: {}", mode);
+        eprintln!("Error: Invalid mode '{}'. Allowed modes are: ...", mode);
         exit(1);
     }
 
