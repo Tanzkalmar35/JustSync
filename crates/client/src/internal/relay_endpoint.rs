@@ -20,7 +20,7 @@ impl RelayEndpoint {
 
         let (host_part, port) = Self::split_host_port(input, default_port)?;
 
-        // 1. Is it a valid IP address? (Handles both IPv4 and IPv6)
+        // Syntactic validation
         if host_part.parse::<IpAddr>().is_ok() {
             return Ok(Self {
                 host: host_part.to_string(),
@@ -28,7 +28,7 @@ impl RelayEndpoint {
             });
         }
 
-        // 2. Is it a valid domain name suitable for TLS/QUIC?
+        // Compatibility check
         if ServerName::try_from(host_part).is_ok() {
             return Ok(Self {
                 host: host_part.to_string(),
