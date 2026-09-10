@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "crates/client",
-    "crates/server"
+    "crates/server",
+    "crates/protocol"
 ]
 
 [profile.dev]

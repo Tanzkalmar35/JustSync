@@ -30,14 +30,6 @@ struct ServerArgs {
     key: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub enum ControlMessage {
-    Register { key: String },
-    SessionCreated { status: String, name: String },
-    Join { name: String, key: String },
-    SessionJoined { status: String },
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install default crypto provider for rustls

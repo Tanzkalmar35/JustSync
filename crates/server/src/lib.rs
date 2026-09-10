@@ -1,5 +1,4 @@
 use quinn::{Connection, Endpoint, ServerConfig, VarInt};
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -10,14 +9,6 @@ pub mod session;
 
 use crate::server::Server;
 use crate::session::Session;
-
-#[derive(Deserialize, Serialize, Debug)]
-pub enum ControlMessage {
-    Register { key: String },
-    SessionCreated { status: String, name: String },
-    Join { name: String, key: String },
-    SessionJoined { status: String },
-}
 
 /// Central run function for this relay server
 ///
@@ -42,7 +33,7 @@ pub async fn run_relay(listen_addr: SocketAddr) -> Result<(), Box<dyn std::error
     let mut crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain, key)?;
-    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+    crypto.alpn_protocols = alpn();
 
     let mut server_config = ServerConfig::with_crypto(std::sync::Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,

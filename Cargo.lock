@@ -935,6 +935,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "just_sync_protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "just_sync_server"
 version = "0.1.0"
 dependencies = [
