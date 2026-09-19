@@ -1,8 +1,8 @@
 use clap::Parser;
+use just_sync_protocol::{alpn, relay::ControlMessage};
 use just_sync_server::server::Server;
 use just_sync_server::session::Session;
 use quinn::{Connection, Endpoint, ServerConfig, VarInt};
-use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
@@ -101,7 +101,7 @@ fn generate_self_signed_config() -> Result<ServerConfig, Box<dyn std::error::Err
     let mut crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain.clone(), key)?;
-    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+    crypto.alpn_protocols = alpn();
 
     let mut server_config = ServerConfig::with_crypto(std::sync::Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,
@@ -169,7 +169,7 @@ pub fn load_certs(
     let mut crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
-    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+    crypto.alpn_protocols = alpn();
 
     let mut server_config = ServerConfig::with_crypto(std::sync::Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,

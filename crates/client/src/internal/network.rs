@@ -1,34 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
+use just_sync_protocol::{alpn, sync::WireMessage};
 use quinn::{ClientConfig, TransportConfig, VarInt, crypto::rustls::QuicClientConfig};
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::debug;
 
 use crate::internal::{
     core::Event, crypto::NoVerifier, lsp::Position, relay_endpoint::RelayEndpoint,
 };
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum WireMessage {
-    Patch {
-        uri: String,
-        data: Vec<u8>,
-    },
-
-    Cursor {
-        uri: String,
-        position: (usize, usize),
-    },
-
-    /// Peer -> Host
-    RequestFullSync,
-
-    /// Host -> Peer
-    FullSyncResponse {
-        files: Vec<(String, Vec<u8>)>,
-    },
-}
 
 #[derive(Debug)]
 pub enum NetworkCommand {
@@ -121,7 +100,7 @@ pub fn into_internal(cmd: WireMessage, agent_id: &str, is_host: bool) -> Event {
 ///
 /// # Returns
 ///
-/// The `WireMessage` translation result.
+/// The [`WireMessage`] translation result.
 #[must_use]
 pub fn into_external(cmd: NetworkCommand) -> WireMessage {
     match cmd {
@@ -166,7 +145,7 @@ pub fn configure_client() -> ClientConfig {
         .with_no_client_auth();
 
     // ALPN has to match
-    crypto.alpn_protocols = vec![b"justsync".to_vec()];
+    crypto.alpn_protocols = alpn();
 
     let mut config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(crypto).unwrap()));
     config.transport_config(Arc::new(make_transport_config()));

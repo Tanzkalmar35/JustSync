@@ -1,4 +1,5 @@
 use just_sync_client::internal::relay_endpoint::RelayEndpoint;
+use just_sync_protocol::{alpn, relay::ControlMessage};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -43,7 +44,7 @@ async fn test_full_system_sync() {
                 rustls_pki_types::PrivateKeyDer::Pkcs8(priv_key),
             )
             .unwrap();
-        crypto.alpn_protocols = vec![b"justsync".to_vec()];
+        crypto.alpn_protocols = alpn();
 
         let mut server_config = quinn::ServerConfig::with_crypto(std::sync::Arc::new(
             quinn::crypto::rustls::QuicServerConfig::try_from(crypto).unwrap(),
@@ -68,18 +69,17 @@ async fn test_full_system_sync() {
                     let (mut send, mut recv) = connection.accept_bi().await.unwrap();
                     let mut buf = vec![0u8; 1024];
                     let n = recv.read(&mut buf).await.unwrap().unwrap_or(0);
-                    let msg: just_sync_server::ControlMessage =
-                        serde_json::from_slice(&buf[..n]).unwrap();
+                    let msg: ControlMessage = serde_json::from_slice(&buf[..n]).unwrap();
 
                     match msg {
-                        just_sync_server::ControlMessage::Register { key: _ } => {
+                        ControlMessage::Register { key: _ } => {
                             let session = just_sync_server::session::Session::new(
                                 std::sync::Arc::new(connection.clone()),
                                 "test-key".to_string(),
                             );
                             let session_name = session.name.clone();
                             server_ref.register_session(session);
-                            let ans = just_sync_server::ControlMessage::SessionCreated {
+                            let ans = ControlMessage::SessionCreated {
                                 status: "ok".to_string(),
                                 name: session_name,
                             };
@@ -88,7 +88,7 @@ async fn test_full_system_sync() {
                                 .unwrap();
                             send.finish().unwrap();
                         }
-                        just_sync_server::ControlMessage::Join { name, key: _ } => {
+                        ControlMessage::Join { name, key: _ } => {
                             if let Some(mut session) = server_ref.find_session(&name) {
                                 let _ = session
                                     .join(

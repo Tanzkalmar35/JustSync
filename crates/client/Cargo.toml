@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 bytes = "1.11.0"
+just_sync_protocol = { version = "0.1.0", path = "../protocol" }
 clap = "4.5.53"
 diamond-types = "1.0.0"
 quinn = "0.11.9"

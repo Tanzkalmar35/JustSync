@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex};
 
+use just_sync_protocol::relay::ControlMessage;
 use rand::RngExt;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use crate::{ControlMessage, connection::hotwire, models::Connection};
+use crate::{connection::hotwire, models::Connection};
 
 #[derive(Clone)]
 pub struct Session {
