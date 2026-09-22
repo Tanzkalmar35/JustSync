@@ -26,6 +26,8 @@ struct PeerContext {
 }
 
 pub struct QuicNetworkAdapter {
+    agent_id: String,
+
     session: SessionCfg,
     peers: Arc<Mutex<HashMap<String, PeerContext>>>, // agent_id -> peer
     core_send: mpsc::Sender<Event>,

@@ -27,9 +27,8 @@ pub enum NetworkCommand {
 #[derive(Clone)]
 pub struct SessionCfg {
     pub agent_id: String,
-    pub key: String,
-    pub relay_addr: RelayEndpoint,
-    pub role: SessionRole,
+    pub relay_addr: Option<RelayEndpoint>,
+    pub invitation: Option<String>,
 }
 
 #[derive(Clone)]

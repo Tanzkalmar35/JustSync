@@ -1,11 +1,13 @@
-use clap::{Arg, Command};
-use std::process::exit;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use clap::Parser;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use just_sync_client::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
+    context::{ClientContext, ClientMode},
     internal::{
         core::{Core, Event},
         crypto::hash,
@@ -17,22 +19,21 @@ use just_sync_client::{
     logger,
 };
 
-struct Context {
-    mode: String,
-    remote_ip: String,
-    session_name: Option<String>,
-    key: String,
-}
-
 #[tokio::main]
 pub async fn main() {
     // Setup Environment
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let ctx = parse_cmd();
-    let is_host = ctx.mode == "host";
+    let ctx = ClientContext::parse();
+    let is_host = matches!(ctx.mode, ClientMode::Host { .. });
+    let _log_guard = logger::init(
+        &SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string(),
+    );
 
-    let _log_guard = logger::init(&ctx.mode);
-    info!("Starting JustSync in {} mode", ctx.mode);
+    info!("Starting JustSync client");
 
     let (core_tx, core_rx) = mpsc::channel::<Event>(100);
     let (net_tx, net_rx) = mpsc::channel::<NetworkCommand>(100);
@@ -86,65 +87,4 @@ pub async fn main() {
     // Run editor adapter on main thread
     let mut adapter = StdioAdapter::new(core_tx);
     adapter.run(editor_rx).await;
-}
-
-fn parse_cmd() -> Context {
-    let matches = Command::new("just_sync_client")
-        .version("1.0")
-        .about("A real-time, editor agnostic collaboration engine")
-        .arg(
-            Arg::new("mode")
-                .long("mode")
-                .help("The daemon mode (host / peer)")
-                .required(true),
-        )
-        .arg(
-            Arg::new("remote-ip")
-                .long("remote-ip")
-                .help("The remote ip address to connect to (required for peer)")
-                .required(true),
-        )
-        .arg(
-            Arg::new("name")
-                .long("session-name")
-                .help("The name of the session to join (retrieve from host)")
-                .required(false),
-        )
-        .arg(
-            Arg::new("key")
-                .long("key")
-                .help("The security token (required for peer)")
-                .required(true),
-        )
-        .arg(
-            Arg::new("stdio")
-                .long("stdio")
-                .hide(true)
-                .action(clap::ArgAction::SetTrue),
-        )
-        .get_matches();
-
-    let mode = matches.get_one::<String>("mode").unwrap().clone();
-    let remote_ip = matches
-        .get_one::<String>("remote-ip")
-        .cloned()
-        .expect("Expected remote ip");
-    let session_name = matches.get_one::<String>("name").cloned();
-    let key = matches
-        .get_one::<String>("key")
-        .cloned()
-        .expect("Expected session key");
-
-    if mode != "host" && mode != "peer" {
-        error!("Invalid mode selected: {}", mode);
-        eprintln!("Error: Invalid mode '{}'. Allowed modes are: ...", mode);
-        exit(1);
-    }
-
-    Context {
-        mode,
-        remote_ip,
-        session_name,
-        key,
-    }
 }
