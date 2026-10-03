@@ -6,9 +6,10 @@
 //! * [`handshake`] - control messages exchanged between two clients during peer setup.
 //! * [`sync`] - messages exchanged between two clients once the peer setup is done.
 
-pub mod client_handshake;
-pub mod relay;
-pub mod sync;
+pub mod client_relay_handshake;
+pub mod envelope;
+
+pub const PROTOCOL_VERSION: u16 = 1;
 
 /// Application-layer protocol negotiation (ALPN) identifiers advertised during
 /// the QUIC/TLS handshake. The client and relay must agree on at least one of

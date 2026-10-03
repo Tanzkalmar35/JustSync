@@ -17,6 +17,10 @@ pub fn hash(key: &str) -> String {
     hex::encode(hash.as_ref())
 }
 
+#[must_use]
+pub fn sign(key: &str) -> Result<String> {
+}
+
 /// As this architecture works on zero trust using E2EE and SPAKE2, there's no need to verify any
 /// certs. Therefore we just accept all traffic without checking, because it's all just encrypted
 /// gibberish anyways (apart from setup traffic).

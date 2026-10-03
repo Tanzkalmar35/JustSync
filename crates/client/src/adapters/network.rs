@@ -3,7 +3,7 @@ use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305, Key, KeyInit,
     aead::{Aead, OsRng},
 };
-use just_sync_protocol::{client_handshake, relay, sync::WireMessage};
+use just_sync_protocol::{PROTOCOL_VERSION, client_relay_handshake::CreateSessionMsg};
 use quinn::{Connection, RecvStream, SendStream};
 use serde::Serialize;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
@@ -15,8 +15,7 @@ use crate::internal::{
     self,
     core::Event,
     network::{
-        NetworkAdapter, NetworkCommand, SessionCfg, SessionRole, configure_client, into_external,
-        into_internal,
+        NetworkAdapter, NetworkCommand, SessionCfg, configure_client, into_external, into_internal,
     },
 };
 
@@ -26,10 +25,10 @@ struct PeerContext {
 }
 
 pub struct QuicNetworkAdapter {
-    agent_id: String,
-
     session: SessionCfg,
+
     peers: Arc<Mutex<HashMap<String, PeerContext>>>, // agent_id -> peer
+
     core_send: mpsc::Sender<Event>,
     core_recv: Mutex<mpsc::Receiver<NetworkCommand>>,
 }
@@ -37,7 +36,7 @@ pub struct QuicNetworkAdapter {
 impl QuicNetworkAdapter {
     /// Checks if the network adapter is connected to the relay server as hosting peer.
     fn is_host(&self) -> bool {
-        matches!(self.session.role, SessionRole::Host {})
+        return self.session.invitation.is_none();
     }
 
     /// Establishes a connection between localhost and a relay server running at the given url.
@@ -114,9 +113,8 @@ impl QuicNetworkAdapter {
             }
         });
 
-        if let SessionRole::Peer { session_name } = &self.session.role {
-            self.join_session(&mut send, &mut recv, session_name.clone())
-                .await?;
+        if let Some(invitation) = &self.session.invitation {
+            self.join_session(&mut send, &mut recv, invitation).await?;
         } else {
             self.init_session(&mut send, &mut recv).await?;
         }
@@ -162,7 +160,7 @@ impl QuicNetworkAdapter {
         mut send: quinn::SendStream,
         mut recv: quinn::RecvStream,
     ) -> anyhow::Result<()> {
-        let init_msg = client_handshake::ControlMessage::InitPeer {
+        let init_msg = client_relay_handshake::ControlMessage::InitPeer {
             agent_id: self.session.agent_id.clone(),
             is_host: self.is_host(),
         };
@@ -170,12 +168,12 @@ impl QuicNetworkAdapter {
             .await
             .expect("Couldn't send verify message");
 
-        let msg: client_handshake::ControlMessage = self
+        let msg: client_relay_handshake::ControlMessage = self
             .recv_framed(&mut recv, None)
             .await
             .expect("Unable to deserialize incoming message");
 
-        if let client_handshake::ControlMessage::InitPeer {
+        if let client_relay_handshake::ControlMessage::InitPeer {
             agent_id: remote_agent_id,
             is_host: remote_is_host,
         } = msg
@@ -263,13 +261,13 @@ impl QuicNetworkAdapter {
                     &Identity::new(remote_agent_id.as_bytes()),
                 );
 
-                let msg = client_handshake::ControlMessage::Spake2MsgA { data: msg_a };
+                let msg = client_relay_handshake::ControlMessage::Spake2MsgA { data: msg_a };
 
                 self.send_framed(&mut send, msg, None)
                     .await
                     .map_err(|e| e.to_string())?;
 
-                if let client_handshake::ControlMessage::Spake2MsgB { data } = self
+                if let client_relay_handshake::ControlMessage::Spake2MsgB { data } = self
                     .recv_framed(recv, None)
                     .await
                     .map_err(|e| e.to_string())?
@@ -287,7 +285,7 @@ impl QuicNetworkAdapter {
             Ordering::Greater => {
                 // Wait for setup initiation
                 let mut msg_a: Vec<u8> = vec![];
-                if let client_handshake::ControlMessage::Spake2MsgA { data } = self
+                if let client_relay_handshake::ControlMessage::Spake2MsgA { data } = self
                     .recv_framed(recv, None)
                     .await
                     .map_err(|e| e.to_string())?
@@ -301,7 +299,7 @@ impl QuicNetworkAdapter {
                     &Identity::new(self.session.agent_id.as_bytes()),
                 );
 
-                let msg = client_handshake::ControlMessage::Spake2MsgB { data: msg_b };
+                let msg = client_relay_handshake::ControlMessage::Spake2MsgB { data: msg_b };
 
                 self.send_framed(&mut send, msg, None)
                     .await
@@ -371,25 +369,11 @@ impl QuicNetworkAdapter {
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
     ) -> anyhow::Result<()> {
-        debug!("[Net] Registering new session on relay");
-        let msg = relay::ControlMessage::Register {
-            key: self.session.key.clone(),
-        };
+        debug!("[Net] Registering as new peer on relay");
+        let response = self.register_on_relay(send, recv).await?;
 
-        let response = self.init(send, recv, msg).await?;
+        if let CreateSessionMsg::Challenge(nonce, deadline_ms) = response {
 
-        if let relay::ControlMessage::SessionCreated { status, name } = response {
-            if status.eq("ok") {
-                info!(
-                    "[Net] Registered new session on relay server: name: {}",
-                    name
-                );
-                let _ = self.core_send.send(Event::SessionRegistered { name }).await;
-            } else {
-                return Err(anyhow::Error::msg(
-                    "Unable to init session on relay server!",
-                ));
-            }
         } else {
             return Err(anyhow::Error::msg(
                 "Invalid relay server response, check relay server logs for more information!",
@@ -416,7 +400,7 @@ impl QuicNetworkAdapter {
         &self,
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
-        session_name: String,
+        invitation: &str,
     ) -> anyhow::Result<()> {
         debug!("[Net] Attempting to join session {}", session_name);
         let msg = relay::ControlMessage::Join {
@@ -424,7 +408,7 @@ impl QuicNetworkAdapter {
             key: self.session.key.clone(),
         };
 
-        let response = self.init(send, recv, msg).await?;
+        let response = self.register_on_relay(send, recv, msg).await?;
 
         if let relay::ControlMessage::SessionJoined { status } = response {
             if status.ne("ok") {
@@ -442,14 +426,12 @@ impl QuicNetworkAdapter {
         Ok(())
     }
 
-    /// Initializes this peer on the relay server.
+    /// Registers the peer on the relay server.
     ///
     /// # Arguments
     ///
     /// * `send` - The localhost -> relay server stream.
     /// * `recv` - The relay server -> localhost stream.
-    /// * `msg` - The message to init with. In practise should either be `relay::ControlMessage::Join`
-    ///   or `relay::ControlMessage::Register`
     ///
     /// # Errors
     ///
@@ -457,24 +439,27 @@ impl QuicNetworkAdapter {
     /// * If writing the given message to the outgoing stream fails.
     /// * If closing the init stream fails.
     /// * If reading a message from the incoming stream fails.
-    /// * If the incoming message is not a valid `relay::ControlMessage`.
+    /// * If the incoming message is not a valid `SessionCreatedMsg`.
     ///
     /// # Returns
     ///
-    /// The relay server response of type `relay::ControlMessage`.
-    async fn init(
+    /// The relay server response of type `SessionCreatedMsg`.
+    async fn register_on_relay(
         &self,
         send: &mut SendStream,
         recv: &mut RecvStream,
-        msg: relay::ControlMessage,
-    ) -> anyhow::Result<relay::ControlMessage> {
-        send.write_all(&serde_json::to_vec(&msg)?).await?;
+    ) -> anyhow::Result<CreateSessionMsg> {
+        let register_msg = CreateSessionMsg::Register {
+            p_version: PROTOCOL_VERSION,
+        };
+
+        send.write_all(&postcard::to_vec(&register_msg)?).await?;
         send.finish()?;
 
         let mut buf = vec![0u8; 1024];
         let n = recv.read(&mut buf).await?.unwrap_or(0);
 
-        Ok(serde_json::from_slice::<relay::ControlMessage>(&buf[..n])?)
+        Ok(postcard::from_bytes(&buf[..n])?)
     }
 
     /// Broadcasts a given message to all connected peers.

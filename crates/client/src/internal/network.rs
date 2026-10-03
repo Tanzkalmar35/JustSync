@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use just_sync_protocol::{alpn, sync::WireMessage};
+use just_sync_protocol::alpn;
 use quinn::{ClientConfig, TransportConfig, VarInt, crypto::rustls::QuicClientConfig};
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -27,7 +27,9 @@ pub enum NetworkCommand {
 #[derive(Clone)]
 pub struct SessionCfg {
     pub agent_id: String,
-    pub relay_addr: Option<RelayEndpoint>,
+    pub relay_addr: RelayEndpoint,
+
+    // Holds an invariant: None means the session is host - Some(..) means joining peer.
     pub invitation: Option<String>,
 }
 

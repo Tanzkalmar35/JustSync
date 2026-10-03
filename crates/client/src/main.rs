@@ -42,19 +42,17 @@ pub async fn main() {
     let agent_id = Uuid::new_v4().to_string();
 
     // Connect to relay and run network actor
-    let role = if is_host {
-        SessionRole::Host {}
+    let invitation = if let ClientMode::Peer { invitation } = ctx.mode {
+        Some(invitation)
     } else {
-        SessionRole::Peer {
-            session_name: ctx.session_name.unwrap(),
-        }
+        None
     };
+
     let session = SessionCfg {
         agent_id: agent_id.clone(),
-        key: hash(&ctx.key),
         relay_addr: RelayEndpoint::parse(&ctx.remote_ip, 5000)
             .expect("Invalid remote endpoint provided"),
-        role,
+        invitation: invitation,
     };
     let net_to_core_tx = core_tx.clone();
 
