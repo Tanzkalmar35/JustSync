@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use just_sync_protocol::alpn;
 use quinn::{ClientConfig, TransportConfig, VarInt, crypto::rustls::QuicClientConfig};
+use ring::signature::Ed25519KeyPair;
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -29,8 +30,11 @@ pub struct SessionCfg {
     pub agent_id: String,
     pub relay_addr: RelayEndpoint,
 
-    // Holds an invariant: None means the session is host - Some(..) means joining peer.
+    /// Holds an invariant: None means the session is host - Some(..) means joining peer.
     pub invitation: Option<String>,
+
+    /// The Ed25519 private/public keypair used for authentication.
+    pub keypair: Ed25519KeyPair,
 }
 
 #[derive(Clone)]

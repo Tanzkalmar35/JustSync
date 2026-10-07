@@ -10,6 +10,9 @@ use std::{net::SocketAddr, path::Path};
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
 
+mod network;
+mod core;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct ServerArgs {
@@ -35,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Install default crypto provider for rustls
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // Initialize professional logging
+    // Initialize logging
     tracing_subscriber::fmt::init();
 
     let args = ServerArgs::parse();

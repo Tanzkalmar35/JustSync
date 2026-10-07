@@ -1,6 +1,21 @@
-use ring::digest::{SHA256, digest};
+use ring::{digest::{SHA256, digest}, rand::SystemRandom, signature::Ed25519KeyPair};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
+
+/// Generate a private/public keypair using ed25519.
+///
+/// # Returns
+///
+/// * Ok(keypair) if successful
+/// * Err, if pkcs generation or keypair generation fails.
+#[must_use]
+pub fn generate_keypair() -> Result<Ed25519KeyPair> {
+    let rng = SystemRandom::new();
+    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)?;
+    let keypair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())?;
+
+    Ok(keypair)
+}
 
 /// Calculates the SHA256 hash of the given key.
 ///
@@ -15,10 +30,6 @@ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 pub fn hash(key: &str) -> String {
     let hash = digest(&SHA256, key.as_bytes());
     hex::encode(hash.as_ref())
-}
-
-#[must_use]
-pub fn sign(key: &str) -> Result<String> {
 }
 
 /// As this architecture works on zero trust using E2EE and SPAKE2, there's no need to verify any

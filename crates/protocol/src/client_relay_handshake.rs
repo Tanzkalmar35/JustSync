@@ -19,9 +19,6 @@ pub enum CreateSessionMsg {
     Challenge {
         /// Challenging nonce
         nonce: [u8; 32],
-
-        /// Time frame in which the peer has to respond
-        deadline_ms: u32,
     },
 
     /// Hosting peer -> relay: The command to actually initialize a new session, including the
@@ -29,9 +26,6 @@ pub enum CreateSessionMsg {
     CreateSession {
         /// Stored on the relay to identify the session owner
         identity_pk: [u8; 32],
-
-        /// Policy defined by relay; TODO: Determine design
-        admission_token: Option<u8>,
 
         /// The sign of the challenge received previously from the host
         /// Sign(identity_sk, "create" | nonce | exporter | session_id | identity_pk | adimission_token)

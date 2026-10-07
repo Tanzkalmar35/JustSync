@@ -6,17 +6,9 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use just_sync_client::{
-    adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter},
-    context::{ClientContext, ClientMode},
-    internal::{
-        core::{Core, Event},
-        crypto::hash,
-        fs::FsOps,
-        handler::EditorAdapter,
-        network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole},
-        relay_endpoint::RelayEndpoint,
-    },
-    logger,
+    adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter}, context::{ClientContext, ClientMode}, internal::{
+        core::{Core, Event}, crypto::{generate_keypair, hash}, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole}, relay_endpoint::RelayEndpoint,
+    }, logger,
 };
 
 #[tokio::main]
@@ -53,6 +45,7 @@ pub async fn main() {
         relay_addr: RelayEndpoint::parse(&ctx.remote_ip, 5000)
             .expect("Invalid remote endpoint provided"),
         invitation: invitation,
+        keypair: generate_keypair().expect("Unable to generate ed25519 private/public keypair")
     };
     let net_to_core_tx = core_tx.clone();
 

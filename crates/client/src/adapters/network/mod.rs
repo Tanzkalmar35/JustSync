@@ -3,21 +3,32 @@ use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305, Key, KeyInit,
     aead::{Aead, OsRng},
 };
-use just_sync_protocol::{PROTOCOL_VERSION, client_relay_handshake::CreateSessionMsg};
+use hex::{ToHex, encode};
+use just_sync_protocol::{
+    PROTOCOL_VERSION,
+    client_relay_handshake::{Capabilities, CreateSessionMsg},
+};
 use quinn::{Connection, RecvStream, SendStream};
+use ring::signature::KeyPair;
 use serde::Serialize;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use std::{cmp::Ordering, collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, error, info};
 
-use crate::internal::{
-    self,
-    core::Event,
-    network::{
-        NetworkAdapter, NetworkCommand, SessionCfg, configure_client, into_external, into_internal,
+use crate::{
+    adapters::network::protocol_impl::ProtocolImpl,
+    internal::{
+        self,
+        core::Event,
+        network::{
+            NetworkAdapter, NetworkCommand, SessionCfg, configure_client, into_external,
+            into_internal,
+        },
     },
 };
+
+mod protocol_impl;
 
 struct PeerContext {
     sender: quinn::SendStream,
@@ -25,15 +36,35 @@ struct PeerContext {
 }
 
 pub struct QuicNetworkAdapter {
+    /// Information about the current session.
     session: SessionCfg,
+    /// Implementation of the protocol - bare-bones protocol helper.
+    protocol_impl: protocol_impl::ProtocolImpl,
 
+    /// Connected peers.
     peers: Arc<Mutex<HashMap<String, PeerContext>>>, // agent_id -> peer
 
+    /// Send events coming from remote to the core.
     core_send: mpsc::Sender<Event>,
+    /// Receive events to send out to remote from core.
     core_recv: Mutex<mpsc::Receiver<NetworkCommand>>,
 }
 
 impl QuicNetworkAdapter {
+    fn new(
+        session: SessionCfg,
+        core_send: mpsc::Sender<Event>,
+        core_recv: Mutex<mpsc::Receiver<NetworkCommand>>,
+    ) -> Self {
+        Self {
+            session,
+            protocol_impl: ProtocolImpl {},
+            peers: Arc::new(Mutex::new(HashMap::new())),
+            core_send,
+            core_recv,
+        }
+    }
+
     /// Checks if the network adapter is connected to the relay server as hosting peer.
     fn is_host(&self) -> bool {
         return self.session.invitation.is_none();
@@ -164,11 +195,13 @@ impl QuicNetworkAdapter {
             agent_id: self.session.agent_id.clone(),
             is_host: self.is_host(),
         };
-        self.send_framed(&mut send, &init_msg, None)
+        self.protocol_impl
+            .send_framed(&mut send, &init_msg, None)
             .await
             .expect("Couldn't send verify message");
 
         let msg: client_relay_handshake::ControlMessage = self
+            .protocol_impl
             .recv_framed(&mut recv, None)
             .await
             .expect("Unable to deserialize incoming message");
@@ -203,7 +236,8 @@ impl QuicNetworkAdapter {
                 info!("[Net] Requesting initial sync from host");
                 let sync_req = WireMessage::RequestFullSync;
                 if let Some(host_ctx) = self.peers.lock().await.get_mut(&remote_agent_id) {
-                    self.send_framed(&mut host_ctx.sender, &sync_req, Some(&host_ctx.secret))
+                    self.protocol_impl
+                        .send_framed(&mut host_ctx.sender, &sync_req, Some(&host_ctx.secret))
                         .await
                         .expect("Failed to send sync request");
                 }
@@ -263,11 +297,13 @@ impl QuicNetworkAdapter {
 
                 let msg = client_relay_handshake::ControlMessage::Spake2MsgA { data: msg_a };
 
-                self.send_framed(&mut send, msg, None)
+                self.protocol_impl
+                    .send_framed(&mut send, msg, None)
                     .await
                     .map_err(|e| e.to_string())?;
 
                 if let client_relay_handshake::ControlMessage::Spake2MsgB { data } = self
+                    .protocol_impl
                     .recv_framed(recv, None)
                     .await
                     .map_err(|e| e.to_string())?
@@ -286,6 +322,7 @@ impl QuicNetworkAdapter {
                 // Wait for setup initiation
                 let mut msg_a: Vec<u8> = vec![];
                 if let client_relay_handshake::ControlMessage::Spake2MsgA { data } = self
+                    .protocol_impl
                     .recv_framed(recv, None)
                     .await
                     .map_err(|e| e.to_string())?
@@ -301,7 +338,8 @@ impl QuicNetworkAdapter {
 
                 let msg = client_relay_handshake::ControlMessage::Spake2MsgB { data: msg_b };
 
-                self.send_framed(&mut send, msg, None)
+                self.protocol_impl
+                    .send_framed(&mut send, msg, None)
                     .await
                     .map_err(|e| e.to_string())?;
 
@@ -335,7 +373,11 @@ impl QuicNetworkAdapter {
         agent_id: &str,
     ) {
         loop {
-            match self.recv_framed(&mut recv, Some(cipher)).await {
+            match self
+                .protocol_impl
+                .recv_framed(&mut recv, Some(cipher))
+                .await
+            {
                 Ok(wire_msg) => {
                     let event = into_internal(wire_msg, agent_id, self.is_host());
                     match self.core_send.send(event.clone()).await {
@@ -354,7 +396,7 @@ impl QuicNetworkAdapter {
         }
     }
 
-    /// Initializes a new session on hte remote relay server.
+    /// Initializes a new session on the remote relay server.
     ///
     /// # Arguments
     ///
@@ -364,23 +406,58 @@ impl QuicNetworkAdapter {
     /// # Errors
     ///
     /// * If sending the initialization message fails.
+    ///
+    /// # Returns
+    ///
+    /// * The session id + capabilities on success.
     async fn init_session(
         &self,
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<(String, Capabilities)> {
         debug!("[Net] Registering as new peer on relay");
-        let response = self.register_on_relay(send, recv).await?;
+        let response = self.protocol_impl.send_register_cmd(send, recv).await?;
 
-        if let CreateSessionMsg::Challenge(nonce, deadline_ms) = response {
+        // Expect challenge -> read nonce to sign
+        let nonce = if let CreateSessionMsg::Challenge(nonce) = response {
+            nonce
+        } else {
+            return Err(anyhow::Error::msg(
+                "Invalid relay server response, check relay server logs for more information!",
+            ));
+        };
 
+        // Sign nonce using keypair and send create session signal
+        let sig = self.session.keypair.sign(nonce);
+        let msg = CreateSessionMsg::CreateSession {
+            identity_pk: self.session.keypair.public_key().encode_hex(),
+            sig_id: sig.encode_hex(),
+        };
+
+        let create_session_response = self.protocol_impl.send_create_session_cmd(
+            send,
+            recv,
+            self.session.keypair.public_key().encode_hex(),
+            sig.encode_hex(),
+        );
+
+        // Return session id and capabilities on success - expecting successful session creation
+        if let CreateSessionMsg::SessionCreated {
+            session_id,
+            server_time,
+            capabilities,
+        } = create_session_response
+        {
+            info!("New session created at: {server_time}");
+            s_id = str::from_utf8(&session_id)
+                .expect("Could not decode session id")
+                .to_string();
+            return Ok((s_id, capabilities));
         } else {
             return Err(anyhow::Error::msg(
                 "Invalid relay server response, check relay server logs for more information!",
             ));
         }
-
-        Ok(())
     }
 
     /// Joins an existing session on the relay server.
@@ -408,7 +485,7 @@ impl QuicNetworkAdapter {
             key: self.session.key.clone(),
         };
 
-        let response = self.register_on_relay(send, recv, msg).await?;
+        let response = self.register_on_relay(send, recv).await?;
 
         if let relay::ControlMessage::SessionJoined { status } = response {
             if status.ne("ok") {
@@ -426,42 +503,6 @@ impl QuicNetworkAdapter {
         Ok(())
     }
 
-    /// Registers the peer on the relay server.
-    ///
-    /// # Arguments
-    ///
-    /// * `send` - The localhost -> relay server stream.
-    /// * `recv` - The relay server -> localhost stream.
-    ///
-    /// # Errors
-    ///
-    /// * If serializing the given message fails.
-    /// * If writing the given message to the outgoing stream fails.
-    /// * If closing the init stream fails.
-    /// * If reading a message from the incoming stream fails.
-    /// * If the incoming message is not a valid `SessionCreatedMsg`.
-    ///
-    /// # Returns
-    ///
-    /// The relay server response of type `SessionCreatedMsg`.
-    async fn register_on_relay(
-        &self,
-        send: &mut SendStream,
-        recv: &mut RecvStream,
-    ) -> anyhow::Result<CreateSessionMsg> {
-        let register_msg = CreateSessionMsg::Register {
-            p_version: PROTOCOL_VERSION,
-        };
-
-        send.write_all(&postcard::to_vec(&register_msg)?).await?;
-        send.finish()?;
-
-        let mut buf = vec![0u8; 1024];
-        let n = recv.read(&mut buf).await?.unwrap_or(0);
-
-        Ok(postcard::from_bytes(&buf[..n])?)
-    }
-
     /// Broadcasts a given message to all connected peers.
     ///
     /// # Arguments
@@ -471,128 +512,12 @@ impl QuicNetworkAdapter {
         for (agent_id, ctx) in self.peers.lock().await.iter_mut() {
             debug!("[Net] Broadcasting patch to {}", agent_id);
             if let Err(e) = self
+                .protocol_impl
                 .send_framed(&mut ctx.sender, &msg, Some(&ctx.secret))
                 .await
             {
                 error!("[Net] Broadcast to {} failed: {}", agent_id, e);
             }
-        }
-    }
-
-    /// Sends a given message in valid format, end to end encrypted.
-    ///
-    /// # Arguments
-    ///
-    /// * `send` - The localhost -> remote peer stream.
-    /// * `msg` - The message to send to the remote peer.
-    /// * `cipher` - The cipher used for E2EE.
-    ///
-    /// # Errors
-    ///
-    /// * If serializing the given message fails.
-    /// * If encryption of the message fails.
-    /// * If writing the message and the header to the output stream fails.
-    async fn send_framed<T>(
-        &self,
-        send: &mut quinn::SendStream,
-        msg: T,
-        cipher: Option<&ChaCha20Poly1305>,
-    ) -> Result<()>
-    where
-        T: Sized + Serialize,
-    {
-        let mut bytes = serde_json::to_vec(&msg)?;
-
-        // Encrypt message if cipher is provided, don't if not
-        if let Some(c) = cipher {
-            let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
-            match c.encrypt(&nonce, bytes.as_ref()) {
-                Ok(blob) => {
-                    // Prepend the 12-byte nonce to the ciphertext
-                    let mut payload = nonce.to_vec();
-                    payload.extend_from_slice(&blob);
-                    bytes = payload;
-                }
-                Err(e) => {
-                    error!(
-                        "[Net] An error occured while encrypting outgoing message: {:?}",
-                        e
-                    );
-                    return Err(anyhow::anyhow!("Encryption failed"));
-                }
-            }
-        }
-
-        let len = u32::try_from(bytes.len())?;
-
-        send.write_all(&len.to_be_bytes()).await?;
-        send.write_all(&bytes).await?;
-        Ok(())
-    }
-
-    /// Recieves, decrypts and forwards a formatted message from a peer to the core.
-    ///
-    /// # Arguments
-    ///
-    /// * `recv` - The remote peer -> localhost stream.
-    /// * `cipher` - The cipher used for decryption of the incoming message.
-    ///
-    /// # Errors
-    ///
-    /// * If reading the message from the `RecvStream` fails
-    /// * If the incoming message is >100MB.
-    /// * If the cipher is provided, if the incoming message does not contain the nonce.
-    /// * If the cipher is provided, if decrypting the incoming message fails.
-    ///
-    /// # Returns
-    ///
-    /// The incoming message, validated, decrypted, ready to use.
-    async fn recv_framed<T>(
-        &self,
-        recv: &mut quinn::RecvStream,
-        cipher: Option<&ChaCha20Poly1305>,
-    ) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        let mut len_buf = [0u8; 4];
-        recv.read_exact(&mut len_buf).await?;
-        let len = u32::from_be_bytes(len_buf) as usize;
-
-        // Validate msg size
-        if len > 100 * 1024 * 1024 {
-            return Err(anyhow::anyhow!("Message too large (100MB limit)"));
-        } else if len == 0 {
-            return Box::pin(self.recv_framed(recv, cipher)).await;
-        }
-
-        let mut buf = vec![0u8; len];
-        recv.read_exact(&mut buf).await?;
-
-        // If a cipher is provided, we expect encrypted traffic. Otherwise not.
-        if let Some(c) = cipher {
-            // ChaCha20Poly1305 nonce is exactly 12 bytes
-            if buf.len() < 12 {
-                return Err(anyhow::anyhow!(
-                    "Encrypted payload too small to contain nonce"
-                ));
-            }
-
-            // Split the buffer into nonce and ciphertext
-            let nonce = chacha20poly1305::Nonce::clone_from_slice(&buf[..12]);
-            match c.decrypt(&nonce, &buf[12..]) {
-                Ok(text) => Ok(serde_json::from_slice::<T>(&text)?),
-                Err(e) => {
-                    error!(
-                        "[Net] An error occured decrypting incoming message: {:?}",
-                        e
-                    );
-                    Err(anyhow::anyhow!("Decryption failed"))
-                }
-            }
-        } else {
-            // Unencrypted traffic (e.g., initial SPAKE2 handshake)
-            Ok(serde_json::from_slice::<T>(&buf)?)
         }
     }
 }
@@ -618,12 +543,7 @@ impl NetworkAdapter for QuicNetworkAdapter {
         core_tx: mpsc::Sender<Event>,
         net_rx: mpsc::Receiver<crate::internal::network::NetworkCommand>,
     ) -> anyhow::Result<()> {
-        let adapter = Self {
-            session: session.clone(),
-            peers: Arc::new(Mutex::new(HashMap::new())),
-            core_send: core_tx,
-            core_recv: Mutex::new(net_rx),
-        };
+        let adapter = Self::new(session.clone(), core_send, core_recv);
 
         let socket_addr = session.relay_addr.resolve().await?;
         info!(

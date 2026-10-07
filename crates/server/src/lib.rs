@@ -11,6 +11,12 @@ pub mod session;
 use crate::server::Server;
 use crate::session::Session;
 
+pub enum Event {
+    RegisterPeer {
+        id: String,
+    }
+}
+
 /// Central run function for this relay server
 ///
 /// # Arguments
