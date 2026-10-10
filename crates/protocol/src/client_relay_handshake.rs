@@ -1,6 +1,27 @@
 //! Control messages exchanged between a peer and a relay server.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// Traffic between the hosting peer and the relay server.
+/// Peers ping the relay to see if it's up and running, so further traffic can be trusted to
+/// arrive.
+#[derive(Serialize, Deserialize)]
+pub enum PingRelayMsg {
+    /// Peer -> relay: Peer pings the relay to see if the open connection does its job.
+    Ping { intend: PingRelayIntend },
+
+    /// Relay -> peer: Response to a ping, signaling it's up and running (the negative case would
+    /// mean that the ping does not arrive and therefore no answer is sent).
+    /// TODO: Maybe introduce a detailed status, but probably not needed rn.
+    Pong {},
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum PingRelayIntend {
+    CreateSession,
+    JoinSession,
+    // TODO: More?
+}
 
 /// Traffic between the hosting peer and the relay server.
 /// Successful case leads to a valid session being created on the relay server, so the host can
@@ -11,7 +32,6 @@ pub enum CreateSessionMsg {
     Register {
         /// Protocol version
         p_version: u16,
-
         // TODO: maybe action???
     },
 
@@ -37,18 +57,15 @@ pub enum CreateSessionMsg {
         /// The id of the created session used for the peer's invitation generation
         session_id: [u8; 16],
 
-        /// The relay-captured time of session creation
-        server_time: [u8; 64],
-
         /// The capabilities that were configured on the relay that apply for this session
         capabilities: Capabilities,
     },
 }
 
 /// Relay server capabilities
+#[derive(Serialize, Deserialize)]
 pub struct Capabilities {
     /// The maximum lobby size
     pub max_members: usize,
-    
     // TODO: Add more
 }

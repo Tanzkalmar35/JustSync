@@ -1,4 +1,8 @@
-use just_sync_protocol::client_relay_handshake::CreateSessionMsg;
+use chacha20poly1305::ChaCha20Poly1305;
+use just_sync_protocol::{PROTOCOL_VERSION, client_relay_handshake::CreateSessionMsg};
+use quinn::{RecvStream, SendStream};
+use serde::Serialize;
+use tracing::error;
 
 pub(super) struct ProtocolImpl {}
 
@@ -30,7 +34,7 @@ impl ProtocolImpl {
             p_version: PROTOCOL_VERSION,
         };
 
-        send.write_all(&postcard::to_vec(&register_msg)?).await?;
+        send.write_all(&postcard::to_stdvec(&register_msg)?).await?;
         send.finish()?;
 
         let mut buf = vec![0u8; 1024];
@@ -45,13 +49,13 @@ impl ProtocolImpl {
         recv: &mut RecvStream,
         pk: [u8; 32],
         sig: [u8; 32],
-    ) -> Result<CreateSessionMsg> {
+    ) -> anyhow::Result<CreateSessionMsg> {
         let msg = CreateSessionMsg::CreateSession { 
             identity_pk: pk, 
             sig_id: sig, 
         };
 
-        send.write_all(&postcard::to_vec(&msg)?).await?;
+        send.write_all(&postcard::to_stdvec(&msg)?).await?;
         send.finish()?;
 
         let mut buf = vec![0u8; 1024];
@@ -78,7 +82,7 @@ impl ProtocolImpl {
         send: &mut quinn::SendStream,
         msg: T,
         cipher: Option<&ChaCha20Poly1305>,
-    ) -> Result<()>
+    ) -> anyhow::Result<()>
     where
         T: Sized + Serialize,
     {

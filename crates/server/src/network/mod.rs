@@ -1,14 +1,22 @@
-use just_sync_server::Event;
-use quinn::{RecvStream, SendStream};
+use std::sync::Arc;
+
+use quinn::Endpoint;
+use tokio::io::AsyncWriteExt;
+use tracing::{error, info};
 
 use crate::core::CoreActor;
+use crate::models::Connection;
+use crate::network::connection::PeerConnection;
+
+mod connection;
+mod endpoint;
+mod protocol;
 
 pub(crate) struct NetworkActor {
-    /// Receive events from the core actor.
-    // recv: RecvStream<Event>,
-
     /// Send events to the core actor
-    core_tx: SendStream<Event>,
+    core: CoreActor,
+
+    endpoint: quinn::Endpoint,
 }
 
 impl NetworkActor {
@@ -21,11 +29,31 @@ impl NetworkActor {
     /// # Returns
     ///
     /// An object of type `NetworkActor`.
-    pub fn new(core_tx: SendStream<Event>) -> Self {
-        Self { core_tx }
+    pub(crate) fn new(core: CoreActor, endpoint: Endpoint) -> Self {
+        Self { core, endpoint }
     }
 
-    pub fn start(&self) -> Result<()> {
+    pub(crate) async fn start(&self) -> anyhow::Result<()> {
+        // Loop of accepting new peers
+        while let Some(incoming) = self.endpoint.accept().await {
+            tokio::spawn(async move {
+                match incoming.await {
+                    Ok(connection) => {
+                        info!(
+                            "New connection attempt from: {}",
+                            connection.remote_address()
+                        );
+
+                        let conn = PeerConnection::new();
+                        if let Err(e) = conn.start(connection).await {
+                            error!("Connection handler failed: {e}");
+                        }
+                    }
+                    Err(e) => error!("Failed to establish QUIC connection: {e}"),
+                }
+            });
+        }
+
         Ok(())
     }
 
@@ -83,3 +111,30 @@ impl NetworkActor {
         println!("Copy tasks started");
     }
 }
+
+// match ping {
+//     ControlMessage::Register { key } => {
+//         let session = Session::new(Arc::new(connection.clone()), key);
+//         let session_name = session.name.clone();
+//         server.register_session(session.clone());
+//         let ans = ControlMessage::SessionCreated {
+//             status: String::from("ok"),
+//             name: session_name,
+//         };
+//         send.write_all(&serde_json::to_vec(&ans)?).await?;
+//         send.finish()?;
+//     }
+//     ControlMessage::Join {
+//         name: session_id,
+//         key,
+//     } => {
+//         if let Some(mut session) = server.find_session(&session_id) {
+//             let _ = session
+//                 .join(Arc::new(connection.clone()), key, &mut send)
+//                 .await;
+//         }
+//         tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
+//         send.finish()?;
+//     }
+//     _ => {}
+// }

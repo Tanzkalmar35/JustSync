@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use just_sync_protocol::relay::ControlMessage;
 use rand::RngExt;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 

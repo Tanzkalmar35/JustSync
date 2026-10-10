@@ -1,16 +1,9 @@
 use anyhow::Result;
-use chacha20poly1305::{
-    AeadCore, ChaCha20Poly1305, Key, KeyInit,
-    aead::{Aead, OsRng},
-};
-use hex::{ToHex, encode};
-use just_sync_protocol::{
-    PROTOCOL_VERSION,
-    client_relay_handshake::{Capabilities, CreateSessionMsg},
-};
-use quinn::{Connection, RecvStream, SendStream};
+use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
+use hex::ToHex;
+use just_sync_protocol::client_relay_handshake::{Capabilities, CreateSessionMsg};
+use quinn::Connection;
 use ring::signature::KeyPair;
-use serde::Serialize;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use std::{cmp::Ordering, collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
@@ -543,7 +536,7 @@ impl NetworkAdapter for QuicNetworkAdapter {
         core_tx: mpsc::Sender<Event>,
         net_rx: mpsc::Receiver<crate::internal::network::NetworkCommand>,
     ) -> anyhow::Result<()> {
-        let adapter = Self::new(session.clone(), core_send, core_recv);
+        let adapter = Self::new(session.clone(), core_tx, Mutex::new(net_rx));
 
         let socket_addr = session.relay_addr.resolve().await?;
         info!(
