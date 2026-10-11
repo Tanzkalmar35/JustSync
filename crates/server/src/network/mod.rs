@@ -1,7 +1,9 @@
+use std::ops::Deref;
 use std::sync::Arc;
 
 use quinn::Endpoint;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 
 use crate::core::CoreActor;
@@ -14,7 +16,7 @@ mod protocol;
 
 pub(crate) struct NetworkActor {
     /// Send events to the core actor
-    core: CoreActor,
+    core: Arc<Mutex<CoreActor>>,
 
     endpoint: quinn::Endpoint,
 }
@@ -30,12 +32,16 @@ impl NetworkActor {
     ///
     /// An object of type `NetworkActor`.
     pub(crate) fn new(core: CoreActor, endpoint: Endpoint) -> Self {
-        Self { core, endpoint }
+        Self {
+            core: Arc::new(Mutex::new(core)),
+            endpoint,
+        }
     }
 
     pub(crate) async fn start(&self) -> anyhow::Result<()> {
         // Loop of accepting new peers
         while let Some(incoming) = self.endpoint.accept().await {
+            let core = Arc::clone(&self.core);
             tokio::spawn(async move {
                 match incoming.await {
                     Ok(connection) => {
@@ -44,8 +50,8 @@ impl NetworkActor {
                             connection.remote_address()
                         );
 
-                        let conn = PeerConnection::new();
-                        if let Err(e) = conn.start(connection).await {
+                        let conn = PeerConnection::new(core, connection);
+                        if let Err(e) = conn.start().await {
                             error!("Connection handler failed: {e}");
                         }
                     }
