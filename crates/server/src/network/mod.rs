@@ -117,30 +117,3 @@ impl NetworkActor {
         println!("Copy tasks started");
     }
 }
-
-// match ping {
-//     ControlMessage::Register { key } => {
-//         let session = Session::new(Arc::new(connection.clone()), key);
-//         let session_name = session.name.clone();
-//         server.register_session(session.clone());
-//         let ans = ControlMessage::SessionCreated {
-//             status: String::from("ok"),
-//             name: session_name,
-//         };
-//         send.write_all(&serde_json::to_vec(&ans)?).await?;
-//         send.finish()?;
-//     }
-//     ControlMessage::Join {
-//         name: session_id,
-//         key,
-//     } => {
-//         if let Some(mut session) = server.find_session(&session_id) {
-//             let _ = session
-//                 .join(Arc::new(connection.clone()), key, &mut send)
-//                 .await;
-//         }
-//         tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
-//         send.finish()?;
-//     }
-//     _ => {}
-// }

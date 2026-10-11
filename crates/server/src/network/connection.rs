@@ -16,7 +16,7 @@ impl PeerConnection {
         Self { core, conn }
     }
 
-    pub(super) async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub(super) async fn start(&self) -> anyhow::Result<()> {
         let (mut send, mut recv) = self.conn.accept_bi().await?;
 
         let intend = recv_ping(&mut recv).await?;
@@ -49,13 +49,15 @@ impl PeerConnection {
             return Err(anyhow!("Protocol mismatch during session registration"));
         }
 
+        let core_ref = self.core.lock().await;
+
         // Generate a nonce and send it to the peer to sign
-        let nonce = self.core.lock().await.generate_nonce()?;
+        let nonce = core_ref.generate_nonce()?;
         send_challenge(send, nonce).await?;
 
         // Receive createsession command with the signed nonce
         let (identity, sig) = recv_create_session_cmd(recv).await?;
-        // TODO: Validate, do whatever
+        core_ref.verify_signature(nonce, identity, sig)?;
 
         // Create session & respond to peer
         let (session_id, capabilities) = self.core.lock().await.create_session()?;
