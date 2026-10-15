@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use just_sync_protocol::client_relay_handshake::Capabilities;
 use ring::rand::SystemRandom;
+
+use crate::{core::session::session_manager::SessionManager, models::Connection};
 
 mod crypto;
 mod session;
@@ -7,9 +11,27 @@ mod session;
 pub(crate) struct CoreActor {
     /// Random number factory used for random-byte generation.
     rng: SystemRandom,
+
+    session_manager: SessionManager,
 }
 
 impl CoreActor {
+    /// title
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - description
+    ///
+    /// # Returns
+    ///
+    /// description
+    pub(crate) fn new(rng: SystemRandom) -> Self {
+        Self {
+            rng,
+            session_manager: SessionManager::new(),
+        }
+    }
+
     /// Generate a nonce that can be used for challenges for peers. The nonce consists purely of 32
     /// random bytes.
     ///
@@ -37,7 +59,10 @@ impl CoreActor {
         crypto::verify_signature(nonce, identity, signature)
     }
 
-    pub(crate) fn create_session(&self) -> anyhow::Result<([u8; 16], Capabilities)> {
-        session::create_session()
+    pub(crate) fn create_session(
+        &self,
+        host: Arc<dyn Connection>,
+    ) -> anyhow::Result<([u8; 16], Capabilities)> {
+        self.session_manager.create_session(host)
     }
 }
