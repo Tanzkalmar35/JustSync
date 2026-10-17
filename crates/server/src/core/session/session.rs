@@ -10,13 +10,13 @@ const DEFAULT_CAPABILITIES: Capabilities = Capabilities {
 };
 
 pub(super) struct Session {
-    host: Arc<dyn Connection>,
+    host: quinn::Connection,
     peers: Arc<Mutex<Vec<Box<dyn Connection>>>>,
-    capabilities: Capabilities,
+    pub(super) capabilities: Capabilities,
 }
 
 impl Session {
-    pub(super) fn new(host: Arc<dyn Connection>) -> Self {
+    pub(super) fn new(host: quinn::Connection) -> Self {
         Self {
             host: host,
             peers: Arc::new(Mutex::new(Vec::new())),

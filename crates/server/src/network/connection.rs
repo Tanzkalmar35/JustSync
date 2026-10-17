@@ -1,7 +1,7 @@
 use std::{sync::Arc};
 
 use anyhow::anyhow; use just_sync_protocol::{PROTOCOL_VERSION, client_relay_handshake::PingRelayIntend};
-use quinn::{RecvStream, SendStream};
+use quinn::{Connection, RecvStream, SendStream};
 use tokio::sync::{Mutex};
 
 use crate::{core::CoreActor, network::protocol::{recv_create_session_cmd, recv_create_session_register, recv_ping, send_challenge, send_pong, send_session_created}};
@@ -60,7 +60,7 @@ impl PeerConnection {
         core_ref.verify_signature(nonce, identity, sig)?;
 
         // Create session & respond to peer
-        let (session_id, capabilities) = self.core.lock().await.create_session()?;
+        let (session_id, capabilities) = self.core.lock().await.create_session(self.conn.clone());
         send_session_created(send, session_id, capabilities).await?;
 
         Ok(())

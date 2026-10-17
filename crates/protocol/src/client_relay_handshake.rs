@@ -63,7 +63,7 @@ pub enum CreateSessionMsg {
 }
 
 /// Relay server capabilities
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Capabilities {
     /// The maximum lobby size
     pub max_members: usize,

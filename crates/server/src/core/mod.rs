@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
 use just_sync_protocol::client_relay_handshake::Capabilities;
 use ring::rand::SystemRandom;
 
-use crate::{core::session::session_manager::SessionManager, models::Connection};
+use crate::{core::session::session_manager::SessionManager};
 
 mod crypto;
 mod session;
@@ -59,10 +57,16 @@ impl CoreActor {
         crypto::verify_signature(nonce, identity, signature)
     }
 
-    pub(crate) fn create_session(
-        &self,
-        host: Arc<dyn Connection>,
-    ) -> anyhow::Result<([u8; 16], Capabilities)> {
+    /// Creates a new session with a unique session id.
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - The hosting peer of the new session.
+    ///
+    /// # Returns
+    ///
+    /// A tuple consisting of the new session id and the session's capabilities.
+    pub(crate) fn create_session(&self, host: quinn::Connection) -> ([u8; 16], Capabilities) {
         self.session_manager.create_session(host)
     }
 }
