@@ -1,12 +1,15 @@
 use clap::Parser;
 use just_sync_protocol::alpn;
-use quinn::{Connection, ServerConfig};
+use quinn::{Connection, Endpoint, ServerConfig};
+use ring::rand::SystemRandom;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
+
+use crate::{core::CoreActor, network::NetworkActor};
 
 mod core;
 mod network;
@@ -43,140 +46,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = ServerArgs::parse();
 
-    let endpoint = setup(&args)?;
-    let server = Server::setup();
-
-    // Handle incoming requests loop
+    let core = CoreActor::new(SystemRandom::new());
+    let netw = NetworkActor::new(core, &args)?;
+    netw.start().await?;
 
     Ok(())
 }
 
-/// Loads TLS certificates from file
-///
-/// # Arguments
-///
-/// * `cert_path` - The path to the certificate file
-/// * `key_path` - The path to the key file
-///
-/// # Errors
-///
-/// * If `cert_path` points to no or an invalid file
-/// * If `key_path` points to no or an invalid file
-pub fn load_certs(
-    cert_path: &Path,
-    key_path: &Path,
-) -> Result<ServerConfig, Box<dyn std::error::Error>> {
-    info!("Loading TLS certificates...");
-
-    // Open the certificate and key files
-    let cert_file = File::open(cert_path)
-        .map_err(|e| format!("Failed to open cert file at {}: {e}", cert_path.display()))?;
-    let key_file = File::open(key_path)
-        .map_err(|e| format!("Failed to open key file at {}: {e}", key_path.display()))?;
-
-    let mut cert_reader = BufReader::new(cert_file);
-    let mut key_reader = BufReader::new(key_file);
-
-    // Parse the certificate chain
-    // rustls_pemfile::certs returns an iterator of Results, so we collect them into a Vec
-    let certs = rustls_pemfile::certs(&mut cert_reader)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("Failed to parse certificates: {e}"))?;
-
-    if certs.is_empty() {
-        return Err("No certificates found in the PEM file".into());
-    }
-
-    // Parse the private key
-    // rustls_pemfile handles RSA, PKCS8, and SEC1 keys automatically
-    let key = rustls_pemfile::private_key(&mut key_reader)?
-        .ok_or("No private key found in the PEM file")?;
-
-    // Build the Quinn ServerConfig
-    let mut crypto = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)?;
-    crypto.alpn_protocols = alpn();
-
-    let mut server_config = ServerConfig::with_crypto(std::sync::Arc::new(
-        quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?,
-    ));
-
-    // Configure keep-alives so NAT routers don't drop idle connections
-    let mut transport_config = quinn::TransportConfig::default();
-    transport_config.max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into()?));
-    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
-
-    server_config.transport_config(std::sync::Arc::new(transport_config));
-
-    info!("TLS certificates loaded successfully.");
-    Ok(server_config)
-}
-
-async fn handle_connection(
-    connection: Connection,
-    server: &Server,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Wait for the client to open the first bidirectional stream (the Control Channel)
-    let (mut send, mut recv) = connection.accept_bi().await?;
-
-    // Read first message
-    let mut buf = vec![0u8; 1024];
-    let n = recv.read(&mut buf).await?.unwrap_or(0);
-
-    let msg: ControlMessage = serde_json::from_slice(&buf[..n])?;
-
-    match msg {
-        ControlMessage::Register { key } => {
-            let session = Session::new(Arc::new(connection.clone()), key);
-            let session_name = session.name.clone();
-
-            info!("Host registering session: {session_name}");
-
-            server.register_session(session.clone());
-
-            let ans = ControlMessage::SessionCreated {
-                status: String::from("ok"),
-                name: session_name.clone(),
-            };
-            send.write_all(&serde_json::to_vec(&ans)?).await?;
-            send.finish()?;
-        }
-        ControlMessage::Join {
-            name: session_id,
-            key,
-        } => {
-            info!("Peer trying to join session: {session_id}");
-
-            // Look up the Host's connection in the map
-            if let Some(mut session) = server.find_session(&session_id) {
-                if let Err(e) = session
-                    .join(Arc::new(connection.clone()), key.clone(), &mut send)
-                    .await
-                    && e.eq("Error joining session - invalid key")
-                {
-                    // send.write_all(b"{\"status\":\"error\", \"reason\":\"Invalid key\"}")
-                    //     .await?;
-                    info!("Invalid key: {}", key.clone());
-                }
-            } else {
-                // send.write_all(b"{\"status\":\"error\", \"reason\":\"session not found\"}")
-                //     .await?;
-                info!("Session to join not found: {}", session_id.clone());
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
-            send.shutdown().await.map_err(|e| e.to_string())?;
-        }
-        _ => {
-            error!("Invalid controlmessage received");
-        }
-    }
-
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        if connection.close_reason().is_some() {
-            break;
-        }
-    }
-    Ok(())
-}
+// async fn handle_connection(
+//     connection: Connection,
+//     server: &Server,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     // Wait for the client to open the first bidirectional stream (the Control Channel)
+//     let (mut send, mut recv) = connection.accept_bi().await?;
+//
+//     // Read first message
+//     let mut buf = vec![0u8; 1024];
+//     let n = recv.read(&mut buf).await?.unwrap_or(0);
+//
+//     let msg: ControlMessage = serde_json::from_slice(&buf[..n])?;
+//
+//     match msg {
+//         ControlMessage::Register { key } => {
+//             let session = Session::new(Arc::new(connection.clone()), key);
+//             let session_name = session.name.clone();
+//
+//             info!("Host registering session: {session_name}");
+//
+//             server.register_session(session.clone());
+//
+//             let ans = ControlMessage::SessionCreated {
+//                 status: String::from("ok"),
+//                 name: session_name.clone(),
+//             };
+//             send.write_all(&serde_json::to_vec(&ans)?).await?;
+//             send.finish()?;
+//         }
+//         ControlMessage::Join {
+//             name: session_id,
+//             key,
+//         } => {
+//             info!("Peer trying to join session: {session_id}");
+//
+//             // Look up the Host's connection in the map
+//             if let Some(mut session) = server.find_session(&session_id) {
+//                 if let Err(e) = session
+//                     .join(Arc::new(connection.clone()), key.clone(), &mut send)
+//                     .await
+//                     && e.eq("Error joining session - invalid key")
+//                 {
+//                     // send.write_all(b"{\"status\":\"error\", \"reason\":\"Invalid key\"}")
+//                     //     .await?;
+//                     info!("Invalid key: {}", key.clone());
+//                 }
+//             } else {
+//                 // send.write_all(b"{\"status\":\"error\", \"reason\":\"session not found\"}")
+//                 //     .await?;
+//                 info!("Session to join not found: {}", session_id.clone());
+//             }
+//             tokio::time::sleep(std::time::Duration::from_secs(3600 * 24)).await;
+//             send.shutdown().await.map_err(|e| e.to_string())?;
+//         }
+//         _ => {
+//             error!("Invalid controlmessage received");
+//         }
+//     }
+//
+//     loop {
+//         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+//         if connection.close_reason().is_some() {
+//             break;
+//         }
+//     }
+//     Ok(())
+// }

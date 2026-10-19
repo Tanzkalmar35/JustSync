@@ -1,16 +1,19 @@
-use std::ops::Deref;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use quinn::Endpoint;
+use rustls::server;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+use crate::ServerArgs;
 use crate::core::CoreActor;
 use crate::models::Connection;
 use crate::network::connection::PeerConnection;
+use crate::network::endpoint::QuicEndpoint;
 
-mod connection;
+pub(crate) mod connection;
 mod endpoint;
 mod protocol;
 
@@ -31,11 +34,11 @@ impl NetworkActor {
     /// # Returns
     ///
     /// An object of type `NetworkActor`.
-    pub(crate) fn new(core: CoreActor, endpoint: Endpoint) -> Self {
-        Self {
+    pub(crate) fn new(core: CoreActor, server_args: &ServerArgs) -> anyhow::Result<Self> {
+        Ok(Self {
             core: Arc::new(Mutex::new(core)),
-            endpoint,
-        }
+            endpoint: QuicEndpoint::setup(server_args).map_err(|e| anyhow!(e.to_string()))?,
+        })
     }
 
     pub(crate) async fn start(&self) -> anyhow::Result<()> {

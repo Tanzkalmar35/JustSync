@@ -1,5 +1,9 @@
+use anyhow::anyhow;
 use chacha20poly1305::ChaCha20Poly1305;
-use just_sync_protocol::{PROTOCOL_VERSION, client_relay_handshake::CreateSessionMsg};
+use just_sync_protocol::{
+    PROTOCOL_VERSION,
+    create_session::{HostToRelay, RelayToHost},
+};
 use quinn::{RecvStream, SendStream};
 use serde::Serialize;
 use tracing::error;
@@ -25,43 +29,46 @@ impl ProtocolImpl {
     /// # Returns
     ///
     /// The relay server response of type `SessionCreatedMsg`.
-    pub(super) async fn send_register_cmd(
-        &self,
-        send: &mut SendStream,
-        recv: &mut RecvStream,
-    ) -> anyhow::Result<CreateSessionMsg> {
-        let register_msg = CreateSessionMsg::Register {
+    pub(super) async fn send_register_cmd(&self, send: &mut SendStream) -> anyhow::Result<()> {
+        let register_msg = HostToRelay::Register {
             p_version: PROTOCOL_VERSION,
         };
 
         send.write_all(&postcard::to_stdvec(&register_msg)?).await?;
         send.finish()?;
+        Ok(())
+    }
 
+    pub(super) async fn recv_challenge(
+        &self,
+        recv: &mut RecvStream,
+    ) -> anyhow::Result<([u8; 16], [u8; 32])> {
         let mut buf = vec![0u8; 1024];
         let n = recv.read(&mut buf).await?.unwrap_or(0);
+        let msg = postcard::from_bytes(&buf[..n])?;
 
-        Ok(postcard::from_bytes(&buf[..n])?)
+        return if let RelayToHost::Challenge { nonce, session_id } = msg {
+            Ok((session_id, nonce))
+        } else {
+            Err(anyhow!("Protocol violation - expected a challenge."))
+        };
     }
 
     pub(super) async fn send_create_session_cmd(
         &self,
         send: &mut SendStream,
-        recv: &mut RecvStream,
         pk: [u8; 32],
         sig: [u8; 32],
-    ) -> anyhow::Result<CreateSessionMsg> {
-        let msg = CreateSessionMsg::CreateSession { 
-            identity_pk: pk, 
-            sig_id: sig, 
+    ) -> anyhow::Result<()> {
+        let msg = HostToRelay::CreateSession {
+            identity_pk: pk,
+            sig: sig,
         };
 
         send.write_all(&postcard::to_stdvec(&msg)?).await?;
         send.finish()?;
 
-        let mut buf = vec![0u8; 1024];
-        let n = recv.read(&mut buf).await?.unwrap_or(0);
-
-        Ok(postcard::from_bytes(&buf[..n])?)
+        Ok(())
     }
 
     /// Sends a given message in valid format, end to end encrypted.

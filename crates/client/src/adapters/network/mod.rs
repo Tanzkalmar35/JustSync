@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
 use hex::ToHex;
-use just_sync_protocol::client_relay_handshake::{Capabilities, CreateSessionMsg};
+use just_sync_protocol::{client_relay_handshake::{Capabilities, CreateSessionMsg}, create_session::{HostToRelay, RelayToHost}, signing_input};
 use quinn::Connection;
 use ring::signature::KeyPair;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
@@ -407,29 +407,23 @@ impl QuicNetworkAdapter {
         &self,
         send: &mut quinn::SendStream,
         recv: &mut quinn::RecvStream,
+        exporter: [u8; 32],
     ) -> anyhow::Result<(String, Capabilities)> {
         debug!("[Net] Registering as new peer on relay");
-        let response = self.protocol_impl.send_register_cmd(send, recv).await?;
 
-        // Expect challenge -> read nonce to sign
-        let nonce = if let CreateSessionMsg::Challenge(nonce) = response {
-            nonce
-        } else {
-            return Err(anyhow::Error::msg(
-                "Invalid relay server response, check relay server logs for more information!",
-            ));
-        };
+        self.protocol_impl.send_register_cmd(send).await?;
+        let (s_id, nonce) = self.protocol_impl.recv_challenge(recv).await?;
 
         // Sign nonce using keypair and send create session signal
-        let sig = self.session.keypair.sign(nonce);
-        let msg = CreateSessionMsg::CreateSession {
-            identity_pk: self.session.keypair.public_key().encode_hex(),
-            sig_id: sig.encode_hex(),
-        };
+        
+        let sig = self.session.keypair.sign(&signing_input(&nonce, &exporter, &s_id, identity_pk, token));
+        // let msg = HostToRelay::CreateSession { 
+        //     identity_pk: self.session.keypair.public_key().encode_hex(),
+        //     sig: sig.encode_hex(),
+        // };
 
         let create_session_response = self.protocol_impl.send_create_session_cmd(
             send,
-            recv,
             self.session.keypair.public_key().encode_hex(),
             sig.encode_hex(),
         );

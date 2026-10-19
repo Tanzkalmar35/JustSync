@@ -1,7 +1,7 @@
 use std::{sync::Arc};
 
 use anyhow::anyhow; use just_sync_protocol::{PROTOCOL_VERSION, client_relay_handshake::PingRelayIntend};
-use quinn::{Connection, RecvStream, SendStream};
+use quinn::{RecvStream, SendStream};
 use tokio::sync::{Mutex};
 
 use crate::{core::CoreActor, network::protocol::{recv_create_session_cmd, recv_create_session_register, recv_ping, send_challenge, send_pong, send_session_created}};

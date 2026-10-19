@@ -3,7 +3,7 @@ use std::sync::Arc;
 use dashmap::{DashMap, Entry};
 use just_sync_protocol::client_relay_handshake::Capabilities;
 
-use crate::{core::session::session::Session, models::Connection};
+use crate::core::session::session::Session;
 
 pub(in crate::core) struct SessionManager {
     sessions: Arc<DashMap<[u8; 16], Session>>, // id -> session
