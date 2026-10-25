@@ -1,7 +1,7 @@
 //! Wire types shared between the JustSync client and relay server.
 
-pub mod client_relay_handshake;
-pub mod create_session;
+pub mod error;
+pub mod framing;
 // pub mod envelope;
 
 pub const PROTOCOL_VERSION: u16 = 1;
