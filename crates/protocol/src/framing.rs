@@ -53,7 +53,7 @@ pub struct Frame<'a> {
 ///
 /// # Returns
 ///
-/// A result of type byte vector, formatted as follows if succeeded. A `protocol::error::ErrorCode` if not: 
+/// A result of type byte vector, formatted as follows if succeeded. A `protocol::error::ErrorCode` if not:
 ///
 /// | Offset | Size  | Field             |
 /// |--------|-------|-------------------|
@@ -108,41 +108,40 @@ pub fn decode<T: DeserializeOwned>(
 ///
 /// # Returns
 ///
-/// description
+/// * An error code in any error scenario, such as version mismatches, protocol mismatches etc.
+/// * Ok(None) if the message itself is valid, but contains no real payload content.
+/// * Ok((Frame, end)) if successful. The frame holds the data, the end holds the actual received
+///   length.
 fn decode_frame(buf: &[u8]) -> Result<Option<(Frame<'_>, usize)>, ErrorCode> {
-    // Make sure the buffer is big enough to actually hold the length prefix
-    if buf.len() < PREFIX {
-        return Ok(None);
-    }
-    let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    // Decode the first 4 bytes into the len prefix
+    let prefix_window = buf[0..3]
+        .try_into()
+        .expect("Expected there to be an impl for [u8] -> [u8; 4]");
+    let len = match decode_len_prefix(prefix_window)? {
+        Some(l) => l,
+        None => return Ok(None),
+    };
 
-    if len < SUBHEADER {
-        return Err(ErrorCode::Malformed);
-    }
-    if len > MAX_APP + SUBHEADER {
-        // universal ceiling, before kind is known
-        return Err(ErrorCode::TooLarge {
-            max: (MAX_APP + SUBHEADER) as u32,
-            got: len as u32,
-        });
-    }
+    // Decode the subheader (v + kind, bytes idx 4-7)
     if buf.len() < PREFIX + SUBHEADER {
         return Ok(None);
-    } // need v + kind to judge further
-
+    }
     let v = u16::from_be_bytes([buf[4], buf[5]]);
     let Some(kind) = Kind::from_u8(buf[6]) else {
         return Err(ErrorCode::UnsupportedVersion {
             supported: PROTOCOL_VERSION,
         });
     };
+
+    // Validate protocol version matches
     if v != PROTOCOL_VERSION {
         return Err(ErrorCode::UnsupportedVersion {
             supported: PROTOCOL_VERSION,
         });
     }
+
+    // Validate format
     if len > max_len(kind) + SUBHEADER {
-        // reject a 1 MiB claim at byte 7
         return Err(ErrorCode::TooLarge {
             max: max_len(kind) as u32,
             got: len as u32,
@@ -152,6 +151,7 @@ fn decode_frame(buf: &[u8]) -> Result<Option<(Frame<'_>, usize)>, ErrorCode> {
     if buf.len() < end {
         return Ok(None);
     }
+
     Ok(Some((
         Frame {
             v,
@@ -162,3 +162,22 @@ fn decode_frame(buf: &[u8]) -> Result<Option<(Frame<'_>, usize)>, ErrorCode> {
     )))
 }
 
+fn decode_len_prefix(buf: [u8; 4]) -> Result<Option<usize>, ErrorCode> {
+    if buf.len() < PREFIX {
+        return Ok(None);
+    }
+
+    let len = u32::from_be_bytes(buf) as usize;
+    if len < SUBHEADER {
+        return Err(ErrorCode::Malformed);
+    }
+
+    if len > MAX_APP + SUBHEADER {
+        return Err(ErrorCode::TooLarge {
+            max: (MAX_APP + SUBHEADER) as u32,
+            got: len as u32,
+        });
+    }
+
+    Ok(Some(len))
+}
