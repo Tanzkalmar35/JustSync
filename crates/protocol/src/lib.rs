@@ -2,7 +2,7 @@
 
 pub mod error;
 pub mod framing;
-// pub mod envelope;
+pub mod invite;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 

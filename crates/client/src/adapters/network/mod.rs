@@ -1,7 +1,6 @@
 use anyhow::Result;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
 use hex::ToHex;
-use just_sync_protocol::{client_relay_handshake::{Capabilities, CreateSessionMsg}, create_session::{HostToRelay, RelayToHost}, signing_input};
 use quinn::Connection;
 use ring::signature::KeyPair;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
