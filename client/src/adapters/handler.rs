@@ -1,4 +1,4 @@
-use crate::internal::core::Event;
+use crate::internal::core::NetworkToCoreMessage;
 use crate::internal::handler::{
     EditorAdapter, EditorCommand, handle_change_cmd, handle_close_cmd, handle_cursor_cmd,
     handle_open_cmd,
@@ -14,12 +14,12 @@ use tracing::{debug, error};
 pub struct StdioAdapter {
     reader: BufReader<tokio::io::Stdin>,
     stdout: tokio::io::Stdout,
-    core_tx: mpsc::Sender<Event>,
+    core_tx: mpsc::Sender<NetworkToCoreMessage>,
     root_dir: String,
 }
 
 impl StdioAdapter {
-    pub fn new(core_tx: mpsc::Sender<Event>) -> Self {
+    pub fn new(core_tx: mpsc::Sender<NetworkToCoreMessage>) -> Self {
         Self {
             reader: BufReader::new(tokio::io::stdin()),
             stdout: tokio::io::stdout(),
@@ -344,7 +344,7 @@ impl EditorAdapter for StdioAdapter {
                             self.process_editor_message(header).await;
                         }
                         Ok(None) => {
-                            let _ = self.core_tx.send(Event::Shutdown).await;
+                            let _ = self.core_tx.send(NetworkToCoreMessage::Shutdown).await;
                             break;
                         }
                         Err(e) => {

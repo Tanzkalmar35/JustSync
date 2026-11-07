@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use just_sync_client::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter}, context::{ClientContext, ClientMode}, internal::{
-        core::{Core, Event}, crypto::{generate_keypair, hash}, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, NetworkCommand, SessionCfg, SessionRole}, relay_endpoint::RelayEndpoint,
+        core::{Core, NetworkToCoreMessage}, crypto::{generate_keypair, hash}, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, CoreToNetworkEvent, SessionCfg, SessionRole}, relay_endpoint::RelayEndpoint,
     }, logger,
 };
 
@@ -27,8 +27,8 @@ pub async fn main() {
 
     info!("Starting JustSync client");
 
-    let (core_tx, core_rx) = mpsc::channel::<Event>(100);
-    let (net_tx, net_rx) = mpsc::channel::<NetworkCommand>(100);
+    let (core_tx, core_rx) = mpsc::channel::<NetworkToCoreMessage>(100);
+    let (net_tx, net_rx) = mpsc::channel::<CoreToNetworkEvent>(100);
     let (editor_tx, editor_rx) = mpsc::channel(100);
 
     let agent_id = Uuid::new_v4().to_string();
@@ -63,7 +63,7 @@ pub async fn main() {
 
         let files = fs.scan_project_directory(".");
         for (uri, content) in files {
-            if let Err(e) = core_tx.send(Event::LoadFromDisk { uri, content }).await {
+            if let Err(e) = core_tx.send(NetworkToCoreMessage::LoadFromDisk { uri, content }).await {
                 error!("{}", e)
             }
         }

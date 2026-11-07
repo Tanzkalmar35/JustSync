@@ -8,12 +8,12 @@ use crate::internal::diff;
 use crate::internal::fs::FsOps;
 use crate::internal::handler::EditorCommand;
 use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
-use crate::internal::network::NetworkCommand;
+use crate::internal::network::CoreToNetworkEvent;
 use crate::internal::state::Workspace;
 use tracing::{debug, error, info};
 
 #[derive(Clone, Debug)]
-pub enum Event {
+pub enum NetworkToCoreMessage {
     /// Signals an event that should be ignored
     Ignoring,
 
@@ -82,8 +82,8 @@ pub struct Core {
     workspace: Workspace,
 
     // The Outputs
-    network_tx: mpsc::Sender<NetworkCommand>, // Send patches to peers
-    editor_tx: mpsc::Sender<EditorCommand>,   // Send edits to editor
+    network_tx: mpsc::Sender<CoreToNetworkEvent>, // Send patches to peers
+    editor_tx: mpsc::Sender<EditorCommand>,       // Send edits to editor
 
     // Keeps track of "dirty" files, eg files that are tagged for sync
     dirty_files: HashSet<String>,
@@ -92,7 +92,7 @@ pub struct Core {
 impl Core {
     pub fn new(
         agent_id: String,
-        network_tx: mpsc::Sender<NetworkCommand>,
+        network_tx: mpsc::Sender<CoreToNetworkEvent>,
         editor_tx: mpsc::Sender<EditorCommand>,
     ) -> Self {
         Self {
@@ -116,7 +116,7 @@ impl Core {
     /// * `rx` - The channel to pull messages from.
     /// * `is_host` - Whether the localhost peer is the hosting peer of the session.
     /// * `fs` - The filesystem adapter to use.
-    pub async fn run(mut self, mut rx: mpsc::Receiver<Event>, is_host: bool, fs: impl FsOps) {
+    pub async fn run(mut self, mut rx: mpsc::Receiver<NetworkToCoreMessage>, is_host: bool, fs: impl FsOps) {
         let mut flush_timer = tokio::time::interval(Duration::from_millis(5));
 
         loop {
@@ -124,49 +124,49 @@ impl Core {
                 // Network inbound
                 Some(event) = rx.recv() => {
                     match event {
-                        Event::Ignoring => {
+                        NetworkToCoreMessage::Ignoring => {
                             debug!("[Core] Ignoring event");
                         },
-                        Event::LocalChange { uri, changes } => {
+                        NetworkToCoreMessage::LocalChange { uri, changes } => {
                             debug!("[Core] Handling local change");
                             self.handle_local_change(uri, changes, is_host).await;
                         }
-                        Event::RemotePatch { uri, patch } => {
+                        NetworkToCoreMessage::RemotePatch { uri, patch } => {
                             debug!("[Core] Handling remote change");
                             self.handle_remote_patch(uri, &patch, is_host);
                         }
-                        Event::LoadFromDisk { uri, content } => {
+                        NetworkToCoreMessage::LoadFromDisk { uri, content } => {
                             debug!("[Core] Loading workspace from disk");
                             self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                         }
-                        Event::ClientDidOpen { uri, content } => {
+                        NetworkToCoreMessage::ClientDidOpen { uri, content } => {
                             debug!("[Core] Handling open file event");
                             let doc = self.workspace.get_or_create(uri.as_str(), content.as_str(), is_host);
                             doc.content_shadow = Rope::from_str(&content);
                             self.workspace.mark_open(uri.clone());
                         }
-                        Event::ClientDidClose { uri } => {
+                        NetworkToCoreMessage::ClientDidClose { uri } => {
                             debug!("[Core] Handling close file event");
                             self.workspace.mark_closed(&uri);
                         }
-                        Event::LocalCursorChange { uri, position } => {
+                        NetworkToCoreMessage::LocalCursorChange { uri, position } => {
                             debug!("[Core] Handling local cursor change event");
                             let _ = self
                                 .network_tx
-                                .send(NetworkCommand::BroadcastCursor {
+                                .send(CoreToNetworkEvent::BroadcastCursor {
                                     uri,
                                     position: (position.line, position.character),
                                 })
                                 .await;
                         }
-                        Event::RemoteCursorChange { agent_id, uri, position } => {
+                        NetworkToCoreMessage::RemoteCursorChange { agent_id, uri, position } => {
                             debug!("[Core] Handling remote cursor change event");
                             let _ = self
                                 .editor_tx
                                 .send(EditorCommand::RemoteCursor { agent_id, uri, position })
                                 .await;
                         }
-                        Event::PeerRequestedSync => {
+                        NetworkToCoreMessage::PeerRequestedSync => {
                             debug!("[Core] Handling incoming full sync request");
                             let snapshot = self
                                 .workspace
@@ -177,10 +177,10 @@ impl Core {
 
                             let _ = self
                                 .network_tx
-                                .send(NetworkCommand::SendFullSyncResponse { files: snapshot })
+                                .send(CoreToNetworkEvent::SendFullSyncResponse { files: snapshot })
                                 .await;
                         }
-                        Event::RemoteFullSync { files } => {
+                        NetworkToCoreMessage::RemoteFullSync { files } => {
                             debug!("[Core] Handling incoming full sync");
 
                             let mut files_to_write = Vec::new();
@@ -208,13 +208,13 @@ impl Core {
                                 debug!("[Core] Full sync written to disk");
                             }
                         }
-                        Event::SessionRegistered { name } => {
+                        NetworkToCoreMessage::SessionRegistered { name } => {
                             info!("[Core] New session registered as {}", name);
                             if let Err(e) = self.editor_tx.send(EditorCommand::SessionCreated { name }).await {
                                 error!("{}", e)
                             }
                         }
-                        Event::Shutdown => break,
+                        NetworkToCoreMessage::Shutdown => break,
                     }
                 }
 
@@ -251,7 +251,7 @@ impl Core {
             if !patch.is_empty() {
                 let _ = self
                     .network_tx
-                    .send(NetworkCommand::BroadcastPatch { uri, patch })
+                    .send(CoreToNetworkEvent::BroadcastPatch { uri, patch })
                     .await;
             }
             doc.last_version = current_version;

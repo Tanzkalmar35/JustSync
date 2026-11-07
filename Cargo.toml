@@ -1,9 +1,0 @@
-[workspace]
-members = [
-    "crates/client",
-    "crates/server",
-    "crates/protocol"
-]
-
-[profile.dev]
-debug = true  

@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 use crate::internal::{
-    core::Event,
+    core::NetworkToCoreMessage,
     fs::to_relative_path,
     lsp::{
         CursorPositionParams, DidChangeParams, DidCloseParams, DidOpenParams, LspHeader, Position,
@@ -45,7 +45,7 @@ pub fn is_ignored(uri: &str) -> bool {
 /// * `header` - The lsp header of the didOpen message.
 /// * `to_core` - The Handler -> Core stream.
 /// * `root` - The project root.
-pub async fn handle_open_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, root: &str) {
+pub async fn handle_open_cmd(header: LspHeader, to_core: &mpsc::Sender<NetworkToCoreMessage>, root: &str) {
     if let Some(params_val) = header.params {
         match serde_json::from_value::<DidOpenParams>(params_val) {
             Ok(params) => {
@@ -55,7 +55,7 @@ pub async fn handle_open_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, r
                 }
 
                 let _ = to_core
-                    .send(Event::ClientDidOpen {
+                    .send(NetworkToCoreMessage::ClientDidOpen {
                         uri,
                         content: params.text_document.text,
                     })
@@ -73,7 +73,7 @@ pub async fn handle_open_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, r
 /// * `header` - The lsp header of the didChange message.
 /// * `to_core` - The Handler -> Core stream.
 /// * `root` - The project root.
-pub async fn handle_change_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, root: &str) {
+pub async fn handle_change_cmd(header: LspHeader, to_core: &mpsc::Sender<NetworkToCoreMessage>, root: &str) {
     if let Some(params_val) = header.params {
         match serde_json::from_value::<DidChangeParams>(params_val) {
             Ok(params) => {
@@ -84,7 +84,7 @@ pub async fn handle_change_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>,
                 }
 
                 let _ = to_core
-                    .send(Event::LocalChange {
+                    .send(NetworkToCoreMessage::LocalChange {
                         uri,
                         changes: params.content_changes,
                     })
@@ -107,12 +107,12 @@ pub async fn handle_change_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>,
 /// * `header` - The lsp header of the didClose message.
 /// * `to_core` - The Handler -> Core stream.
 /// * `root` - The project root.
-pub async fn handle_close_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, root: &str) {
+pub async fn handle_close_cmd(header: LspHeader, to_core: &mpsc::Sender<NetworkToCoreMessage>, root: &str) {
     if let Some(params_val) = header.params
         && let Ok(params) = serde_json::from_value::<DidCloseParams>(params_val)
     {
         let uri = to_relative_path(&params.text_document.uri, root);
-        let _ = to_core.send(Event::ClientDidClose { uri }).await;
+        let _ = to_core.send(NetworkToCoreMessage::ClientDidClose { uri }).await;
     }
 }
 
@@ -123,7 +123,7 @@ pub async fn handle_close_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, 
 /// * `header` - The lsp header of the didClose message.
 /// * `to_core` - The Handler -> Core stream.
 /// * `root` - The project root.
-pub async fn handle_cursor_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>, root: &str) {
+pub async fn handle_cursor_cmd(header: LspHeader, to_core: &mpsc::Sender<NetworkToCoreMessage>, root: &str) {
     if let Some(params_val) = header.params
         && let Ok(params) = serde_json::from_value::<CursorPositionParams>(params_val)
     {
@@ -133,7 +133,7 @@ pub async fn handle_cursor_cmd(header: LspHeader, to_core: &mpsc::Sender<Event>,
         }
 
         let _ = to_core
-            .send(Event::LocalCursorChange {
+            .send(NetworkToCoreMessage::LocalCursorChange {
                 uri,
                 position: params.position,
             })

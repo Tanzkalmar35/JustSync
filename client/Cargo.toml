@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 bytes = "1.11.0"
-just_sync_protocol = { version = "0.1.0", path = "../protocol" }
 clap = "4.5.53"
 diamond-types = "1.0.0"
 quinn = "0.11.9"
@@ -34,8 +33,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 postcard = { version = "1.1.3", features = ["use-std"] }
+iroh = "1.4.1"
 
 [dev-dependencies]
 tempfile = "3"
-just_sync_server = { path = "../server" }
 rustls-pki-types = "1"
