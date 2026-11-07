@@ -208,6 +208,7 @@ fn decode_subheader(buf: &[u8; SUBHEADER]) -> Result<Kind, FramingError> {
     Kind::from_u8(buf[2]).ok_or(FramingError::Malformed)
 }
 
+/// #ai-generated - DeepSeek V4.1 Flash, 01.11.26
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,3 +1,4 @@
+use rand_core::CryptoRng;
 use std::net::IpAddr;
 
 use crate::{PROTOCOL_VERSION, error::InviteError};
@@ -33,7 +34,7 @@ impl RelayEndpoint {
         }
 
         // Compatibility check
-        if Self::is_valid_host(host_part) {
+        if Self::validate_hostname(host_part).is_ok() {
             return Ok(Self {
                 host: host_part.to_string(),
                 port,
@@ -88,7 +89,7 @@ impl RelayEndpoint {
     }
 
     /// Validates a given hostname to make sure it's a valid relay server destination.
-    /// 
+    ///
     /// # Arguments
     ///
     /// * `host` - The host name to validate.
@@ -138,7 +139,6 @@ impl RelayEndpoint {
 }
 
 pub struct InviteV1 {
-    v: [u8; 16],
     relay: RelayEndpoint,
     relay_spki_fp: Option<[u8; 32]>,
     session_id: [u8; 16],
@@ -151,12 +151,41 @@ pub struct InviteV1 {
 impl InviteV1 {
     pub fn generate(
         relay: RelayEndpoint,
-        fp: [u8; 32],
+        relay_spki_fp: Option<[u8; 32]>,
+        session_id: [u8; 16],
         authority_pk: [u8; 32],
-        ttl: [u8; 32],
-    ) -> String {
-        let prefix = format!("justsync_v{}", PROTOCOL_VERSION.to_string());
+        expires_at: u64,
+        now: u64,
+        rng: &mut impl CryptoRng,
+    ) -> Result<Self, InviteError> {
+        validate(&relay, expires_at, now)?;
 
-        return String::new();
+        let mut secrets = Zeroizing::new([0u8; 64]);
+        rng.fill_bytes(&mut secrets[..]); // one fill, per the note
+
+        let mut admission = [0u8; 32];
+        let mut invite_secret = [0u8; 32];
+        admission.copy_from_slice(&secrets[..32]);
+        invite_secret.copy_from_slice(&secrets[32..]);
+
+        Ok(Self {
+            relay,
+            relay_spki_fp,
+            session_id,
+            admission,
+            invite_secret,
+            authority_pk,
+            expires_at,
+        })
+    }
+
+    fn validate(relay: &RelayEndpoint, expires_at: u64, now: u64) -> Result<(), InviteError> {
+        if relay.host.is_empty() || relay.host.len() > MAX_HOST_LEN || relay.port == 0 {
+            return Err(InviteError::MalformedAddr);
+        }
+        if now >= expires_at {
+            return Err(InviteError::NotInFuture);
+        }
+        Ok(())
     }
 }
