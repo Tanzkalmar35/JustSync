@@ -8,7 +8,7 @@ use crate::internal::diff;
 use crate::internal::fs::FsOps;
 use crate::internal::handler::EditorCommand;
 use crate::internal::lsp::{Position, TextDocumentContentChangeEvent};
-use crate::internal::network::CoreToNetworkEvent;
+use crate::internal::network::CoreToNetworkMessage;
 use crate::internal::state::Workspace;
 use tracing::{debug, error, info};
 
@@ -82,7 +82,7 @@ pub struct Core {
     workspace: Workspace,
 
     // The Outputs
-    network_tx: mpsc::Sender<CoreToNetworkEvent>, // Send patches to peers
+    network_tx: mpsc::Sender<CoreToNetworkMessage>, // Send patches to peers
     editor_tx: mpsc::Sender<EditorCommand>,       // Send edits to editor
 
     // Keeps track of "dirty" files, eg files that are tagged for sync
@@ -92,7 +92,7 @@ pub struct Core {
 impl Core {
     pub fn new(
         agent_id: String,
-        network_tx: mpsc::Sender<CoreToNetworkEvent>,
+        network_tx: mpsc::Sender<CoreToNetworkMessage>,
         editor_tx: mpsc::Sender<EditorCommand>,
     ) -> Self {
         Self {
@@ -153,7 +153,7 @@ impl Core {
                             debug!("[Core] Handling local cursor change event");
                             let _ = self
                                 .network_tx
-                                .send(CoreToNetworkEvent::BroadcastCursor {
+                                .send(CoreToNetworkMessage::BroadcastCursor {
                                     uri,
                                     position: (position.line, position.character),
                                 })
@@ -177,7 +177,7 @@ impl Core {
 
                             let _ = self
                                 .network_tx
-                                .send(CoreToNetworkEvent::SendFullSyncResponse { files: snapshot })
+                                .send(CoreToNetworkMessage::SendFullSyncResponse { files: snapshot })
                                 .await;
                         }
                         NetworkToCoreMessage::RemoteFullSync { files } => {
@@ -251,7 +251,7 @@ impl Core {
             if !patch.is_empty() {
                 let _ = self
                     .network_tx
-                    .send(CoreToNetworkEvent::BroadcastPatch { uri, patch })
+                    .send(CoreToNetworkMessage::BroadcastPatch { uri, patch })
                     .await;
             }
             doc.last_version = current_version;

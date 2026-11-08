@@ -2,11 +2,12 @@ use std::{sync::Arc, time::Duration};
 
 use quinn::{ClientConfig, TransportConfig, VarInt, crypto::rustls::QuicClientConfig};
 use ring::signature::Ed25519KeyPair;
+use tokio::sync::mpsc;
 
-use crate::internal::{crypto::NoVerifier};
+use crate::internal::{core::NetworkToCoreMessage, crypto::NoVerifier};
 
 #[derive(Debug)]
-pub enum CoreToNetworkEvent {
+pub enum CoreToNetworkMessage {
     BroadcastCursor {
         uri: String,
         position: (usize, usize),
@@ -38,9 +39,14 @@ pub enum SessionRole {
 
 #[async_trait::async_trait]
 pub trait NetworkAdapter: Send {
-    async fn setup() -> anyhow::Result<Self>;
+    async fn setup(
+        core_tx: mpsc::Sender<NetworkToCoreMessage>,
+        net_rx: mpsc::Receiver<CoreToNetworkMessage>,
+    ) -> anyhow::Result<impl NetworkAdapter>;
 
-    async fn run();
+    async fn start();
+
+    async fn shutdown();
 
     // async fn connect_and_run(
     //     session: SessionCfg,

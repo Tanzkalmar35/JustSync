@@ -1,10 +1,26 @@
-use iroh::{Endpoint, EndpointAddr, endpoint::presets};
+use tokio::sync::mpsc;
 
-use crate::internal::network::NetworkAdapter;
+use iroh::{Endpoint, SecretKey, endpoint::presets, protocol::Router};
+
+use crate::{
+    adapters::network::iroh::protocol::IrohProtocol,
+    internal::{
+        core::NetworkToCoreMessage,
+        network::{CoreToNetworkMessage, NetworkAdapter},
+    },
+};
+
+mod protocol;
 
 const ALPN: &str = "justsync_v1";
 
-pub(crate) struct IrohNetworkAdapter {}
+pub(crate) struct IrohNetworkAdapter {
+    endpoint: Endpoint,
+    router: Router,
+
+    core_tx: mpsc::Sender<NetworkToCoreMessage>,
+    net_rx: mpsc::Sender<CoreToNetworkMessage>,
+}
 
 #[async_trait::async_trait]
 impl NetworkAdapter for IrohNetworkAdapter {
@@ -16,18 +32,36 @@ impl NetworkAdapter for IrohNetworkAdapter {
     //
     //     Ok(())
     // }
-    
-    async fn setup() -> anyhow::Result<Self> {
-        let endpoint = Endpoint::bind(presets::N0).await?;
 
-        endpoint.online().await;
-        endpoint.connect(EndpointAddr::new(id), ALPN.as_bytes()).await;
+    async fn setup(
+        core_tx: mpsc::Sender<NetworkToCoreMessage>,
+        net_rx: mpsc::Receiver<CoreToNetworkMessage>,
+    ) -> anyhow::Result<Self> {
+        let secret_key = SecretKey::generate();
+        let endpoint = Endpoint::builder(presets::N0)
+            .secret_key(secret_key)
+            .bind()
+            .await?;
 
-        Ok(Self{})
+        let protocol_handler = IrohProtocol {};
+        let router = Router::builder(endpoint.clone())
+            .accept(ALPN, protocol_handler)
+            .spawn();
+
+        // endpoint.online().await;
+        // endpoint.connect(endpoint.addr(), ALPN.as_bytes()).await;
+
+        Ok(Self {
+            endpoint,
+            router,
+            core_tx,
+            net_rx,
+        })
     }
 
-    async fn run() {}
+    async fn start() {}
+
+    async fn shutdown() {}
 }
 
-impl IrohNetworkAdapter {
-}
+impl IrohNetworkAdapter {}

@@ -2,7 +2,7 @@ use tracing::debug;
 
 use crate::{
     adapters::network::protocol::WireMessage,
-    internal::{core::NetworkToCoreMessage, lsp::Position, network::CoreToNetworkEvent},
+    internal::{core::NetworkToCoreMessage, lsp::Position, network::CoreToNetworkMessage},
 };
 
 /// Handles translating a message from the network to a message the just_sync_client core can interpret.
@@ -59,15 +59,15 @@ pub fn into_internal(cmd: WireMessage, agent_id: &str, is_host: bool) -> Network
 ///
 /// The [`WireMessage`] translation result.
 #[must_use]
-pub fn into_external(cmd: CoreToNetworkEvent) -> WireMessage {
+pub fn into_external(cmd: CoreToNetworkMessage) -> WireMessage {
     match cmd {
-        CoreToNetworkEvent::BroadcastCursor { uri, position } => {
+        CoreToNetworkMessage::BroadcastCursor { uri, position } => {
             WireMessage::Cursor { uri, position }
         }
-        CoreToNetworkEvent::BroadcastPatch { uri, patch } => {
+        CoreToNetworkMessage::BroadcastPatch { uri, patch } => {
             WireMessage::Patch { uri, data: patch }
         }
-        CoreToNetworkEvent::SendFullSyncResponse { files } => {
+        CoreToNetworkMessage::SendFullSyncResponse { files } => {
             WireMessage::FullSyncResponse { files }
         }
     }

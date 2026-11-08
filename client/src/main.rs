@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use just_sync_client::{
     adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter}, context::{ClientContext, ClientMode}, internal::{
-        core::{Core, NetworkToCoreMessage}, crypto::{generate_keypair, hash}, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, CoreToNetworkEvent, SessionCfg, SessionRole}, relay_endpoint::RelayEndpoint,
+        core::{Core, NetworkToCoreMessage}, crypto::{generate_keypair, hash}, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, CoreToNetworkMessage, SessionCfg, SessionRole}, relay_endpoint::RelayEndpoint,
     }, logger,
 };
 
@@ -28,7 +28,7 @@ pub async fn main() {
     info!("Starting JustSync client");
 
     let (core_tx, core_rx) = mpsc::channel::<NetworkToCoreMessage>(100);
-    let (net_tx, net_rx) = mpsc::channel::<CoreToNetworkEvent>(100);
+    let (net_tx, net_rx) = mpsc::channel::<CoreToNetworkMessage>(100);
     let (editor_tx, editor_rx) = mpsc::channel(100);
 
     let agent_id = Uuid::new_v4().to_string();
