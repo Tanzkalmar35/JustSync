@@ -1,5 +1,6 @@
-/target
-/proptest-regressions
+client/target/
+target/
+proptest-regressions/
 
 .notes/
 
