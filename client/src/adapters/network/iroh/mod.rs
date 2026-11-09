@@ -19,7 +19,7 @@ pub(crate) struct IrohNetworkAdapter {
     router: Router,
 
     core_tx: mpsc::Sender<NetworkToCoreMessage>,
-    net_rx: mpsc::Sender<CoreToNetworkMessage>,
+    net_rx: mpsc::Receiver<CoreToNetworkMessage>,
 }
 
 #[async_trait::async_trait]

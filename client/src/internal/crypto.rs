@@ -8,14 +8,14 @@ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 ///
 /// * Ok(keypair) if successful
 /// * Err, if pkcs generation or keypair generation fails.
-#[must_use]
-pub fn generate_keypair() -> Result<Ed25519KeyPair> {
-    let rng = SystemRandom::new();
-    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)?;
-    let keypair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())?;
-
-    Ok(keypair)
-}
+// #[must_use]
+// pub fn generate_keypair() -> anyhow::Result<Ed25519KeyPair> {
+//     let rng = SystemRandom::new();
+//     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)?;
+//     let keypair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())?;
+//
+//     Ok(keypair)
+// }
 
 /// Calculates the SHA256 hash of the given key.
 ///

@@ -84,13 +84,13 @@ pub fn configure_client() -> ClientConfig {
     // Use own verifier
     let verifier = Arc::new(NoVerifier {});
 
-    let mut crypto = rustls::ClientConfig::builder()
+    let crypto = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
 
     // ALPN has to match
-    crypto.alpn_protocols = alpn();
+    // crypto.alpn_protocols = alpn(); TODO
 
     let mut config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(crypto).unwrap()));
     config.transport_config(Arc::new(make_transport_config()));

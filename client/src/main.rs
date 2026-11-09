@@ -6,9 +6,15 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use just_sync_client::{
-    adapters::{fs::FileSystem, handler::StdioAdapter, network::QuicNetworkAdapter}, context::{ClientContext, ClientMode}, internal::{
-        core::{Core, NetworkToCoreMessage}, crypto::{generate_keypair, hash}, fs::FsOps, handler::EditorAdapter, network::{NetworkAdapter, CoreToNetworkMessage, SessionCfg, SessionRole}, relay_endpoint::RelayEndpoint,
-    }, logger,
+    adapters::{fs::FileSystem, handler::StdioAdapter},
+    context::{ClientContext, ClientMode},
+    internal::{
+        core::{Core, NetworkToCoreMessage},
+        fs::FsOps,
+        handler::EditorAdapter,
+        network::CoreToNetworkMessage,
+    },
+    logger,
 };
 
 #[tokio::main]
@@ -40,21 +46,21 @@ pub async fn main() {
         None
     };
 
-    let session = SessionCfg {
-        agent_id: agent_id.clone(),
-        relay_addr: RelayEndpoint::parse(&ctx.remote_ip, 5000)
-            .expect("Invalid remote endpoint provided"),
-        invitation: invitation,
-        keypair: generate_keypair().expect("Unable to generate ed25519 private/public keypair")
-    };
+    // let session = SessionCfg {
+    //     agent_id: agent_id.clone(),
+    //     relay_addr: RelayEndpoint::parse(&ctx.remote_ip, 5000)
+    //         .expect("Invalid remote endpoint provided"),
+    //     invitation: invitation,
+    //     keypair: generate_keypair().expect("Unable to generate ed25519 private/public keypair")
+    // };
     let net_to_core_tx = core_tx.clone();
 
-    tokio::spawn(async move {
-        if let Err(e) = QuicNetworkAdapter::connect_and_run(session, net_to_core_tx, net_rx).await {
-            error!("Network loop panicked: {}", e);
-            std::process::exit(1);
-        }
-    });
+    // tokio::spawn(async move {
+    //     if let Err(e) = QuicNetworkAdapter::connect_and_run(session, net_to_core_tx, net_rx).await {
+    //         error!("Network loop panicked: {}", e);
+    //         std::process::exit(1);
+    //     }
+    // });
 
     // Host: Scan files
     let fs = FileSystem {};
@@ -63,7 +69,10 @@ pub async fn main() {
 
         let files = fs.scan_project_directory(".");
         for (uri, content) in files {
-            if let Err(e) = core_tx.send(NetworkToCoreMessage::LoadFromDisk { uri, content }).await {
+            if let Err(e) = core_tx
+                .send(NetworkToCoreMessage::LoadFromDisk { uri, content })
+                .await
+            {
                 error!("{}", e)
             }
         }
