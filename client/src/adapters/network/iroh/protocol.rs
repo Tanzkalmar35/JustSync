@@ -1,7 +1,13 @@
-#[derive(Debug)]
-pub(super) struct IrohProtocol {}
+use std::sync::Mutex;
 
-impl iroh::protocol::ProtocolHandler for IrohProtocol {
+use iroh::endpoint::{RecvStream, SendStream};
+
+#[derive(Debug)]
+pub(super) struct IrohPeerManager {
+    peers: Mutex<Vec<(SendStream, RecvStream)>>,
+}
+
+impl iroh::protocol::ProtocolHandler for IrohPeerManager {
     /// Accepts a new connection.
     ///
     /// # Returns
@@ -11,27 +17,18 @@ impl iroh::protocol::ProtocolHandler for IrohProtocol {
         &self,
         connection: iroh::endpoint::Connection,
     ) -> Result<(), iroh::protocol::AcceptError> {
-        // We can get the remote's endpoint id from the connection.
         let endpoint_id = connection.remote_id();
         println!("accepted connection from {endpoint_id}");
 
-        // Our protocol is a simple request-response protocol, so we expect the
-        // connecting peer to open a single bi-directional stream.
-        let (mut _send, mut _recv) = connection.accept_bi().await?;
-
-        // Echo any bytes received back directly.
-        // This will keep copying until the sender signals the end of data on the stream.
-        // let bytes_sent = tokio::io::copy(&mut recv, &mut send).await?;
-        // println!("Copied over {bytes_sent} byte(s)");
-
-        // By calling `finish` on the send stream we signal that we will not send anything
-        // further, which makes the receive stream on the other end terminate.
-        // send.finish()?;
-
-        // Wait until the remote closes the connection, which it does once it
-        // received the response.
-        // connection.closed().await;
+        let (send, recv) = connection.accept_bi().await?;
+        self.peers.lock().unwrap().push((send, recv));
 
         Ok(())
+    }
+}
+
+impl IrohPeerManager {
+    fn active_peers(&self) -> Vec<(SendStream, RecvStream)> {
+        self.peers.lock().unwrap()
     }
 }

@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use iroh::{Endpoint, SecretKey, endpoint::presets, protocol::Router};
 
 use crate::{
-    adapters::network::iroh::protocol::IrohProtocol,
+    adapters::network::iroh::protocol::IrohPeerManager,
     internal::{
         core::NetworkToCoreMessage,
         network::{CoreToNetworkMessage, NetworkAdapter},
@@ -43,12 +43,12 @@ impl NetworkAdapter for IrohNetworkAdapter {
             .bind()
             .await?;
 
-        let protocol_handler = IrohProtocol {};
+        let protocol_handler = IrohPeerManager {};
         let router = Router::builder(endpoint.clone())
             .accept(ALPN, protocol_handler)
             .spawn();
 
-        // endpoint.online().await;
+        endpoint.online().await;
         // endpoint.connect(endpoint.addr(), ALPN.as_bytes()).await;
 
         Ok(Self {
