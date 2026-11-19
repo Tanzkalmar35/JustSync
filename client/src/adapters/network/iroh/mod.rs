@@ -1,16 +1,17 @@
 use tokio::sync::mpsc;
 
 use iroh::{Endpoint, SecretKey, endpoint::presets, protocol::Router};
+use tracing::instrument::WithSubscriber;
 
 use crate::{
-    adapters::network::iroh::protocol::IrohPeerManager,
+    adapters::network::iroh::manager::IrohPeerManager,
     internal::{
         core::NetworkToCoreMessage,
         network::{CoreToNetworkMessage, NetworkAdapter},
     },
 };
 
-mod protocol;
+mod manager;
 
 const ALPN: &str = "justsync_v1";
 
@@ -43,7 +44,7 @@ impl NetworkAdapter for IrohNetworkAdapter {
             .bind()
             .await?;
 
-        let protocol_handler = IrohPeerManager {};
+        let protocol_handler = IrohPeerManager::new();
         let router = Router::builder(endpoint.clone())
             .accept(ALPN, protocol_handler)
             .spawn();
@@ -61,7 +62,8 @@ impl NetworkAdapter for IrohNetworkAdapter {
 
     async fn start() {}
 
-    async fn shutdown() {}
+    async fn shutdown(&self) {
+    }
 }
 
 impl IrohNetworkAdapter {}
