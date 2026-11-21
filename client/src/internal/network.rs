@@ -39,20 +39,12 @@ pub enum SessionRole {
 
 #[async_trait::async_trait]
 pub trait NetworkAdapter: Send {
-    async fn setup(
+    async fn start(
         core_tx: mpsc::Sender<NetworkToCoreMessage>,
         net_rx: mpsc::Receiver<CoreToNetworkMessage>,
     ) -> anyhow::Result<impl NetworkAdapter>;
 
-    async fn start();
-
-    async fn shutdown();
-
-    // async fn connect_and_run(
-    //     session: SessionCfg,
-    //     core_tx: mpsc::Sender<NetworkToCoreMessage>,
-    //     net_rx: mpsc::Receiver<CoreToNetworkEvent>,
-    // ) -> anyhow::Result<()>;
+    async fn shutdown(&self) -> anyhow::Result<()>;
 }
 
 /// Builds the transport configuration for quinn.

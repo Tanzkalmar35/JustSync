@@ -1,7 +1,8 @@
-use tokio::sync::mpsc;
+use anyhow::anyhow;
+use serde::Serialize;
+use tokio::{sync::mpsc, task::JoinError};
 
 use iroh::{Endpoint, SecretKey, endpoint::presets, protocol::Router};
-use tracing::instrument::WithSubscriber;
 
 use crate::{
     adapters::network::iroh::manager::IrohPeerManager,
@@ -25,16 +26,7 @@ pub(crate) struct IrohNetworkAdapter {
 
 #[async_trait::async_trait]
 impl NetworkAdapter for IrohNetworkAdapter {
-    // async fn connect_and_run(
-    //     session: SessionCfg,
-    //     core_tx: mpsc::Sender<NetworkToCoreMessage>,
-    //     net_rx: mpsc::Receiver<CoreToNetworkEvent>,
-    // ) -> anyhow::Result<()> {
-    //
-    //     Ok(())
-    // }
-
-    async fn setup(
+    async fn start(
         core_tx: mpsc::Sender<NetworkToCoreMessage>,
         net_rx: mpsc::Receiver<CoreToNetworkMessage>,
     ) -> anyhow::Result<Self> {
@@ -50,7 +42,6 @@ impl NetworkAdapter for IrohNetworkAdapter {
             .spawn();
 
         endpoint.online().await;
-        // endpoint.connect(endpoint.addr(), ALPN.as_bytes()).await;
 
         Ok(Self {
             endpoint,
@@ -60,9 +51,11 @@ impl NetworkAdapter for IrohNetworkAdapter {
         })
     }
 
-    async fn start() {}
-
-    async fn shutdown(&self) {
+    async fn shutdown(&self) -> anyhow::Result<()> {
+        self.router
+            .shutdown()
+            .await
+            .map_err(|e| anyhow!(e.to_string()))
     }
 }
 

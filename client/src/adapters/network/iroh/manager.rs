@@ -1,9 +1,11 @@
+use std::io::Error;
+
+use anyhow::anyhow;
 use dashmap::DashMap;
 use iroh::{
     endpoint::{RecvStream, SendStream},
     protocol::AcceptError,
 };
-use quinn::udp::RecvMeta;
 
 use crate::adapters::network::protocol::{SetupMessage, receive_message};
 
@@ -45,7 +47,9 @@ impl iroh::protocol::ProtocolHandler for IrohPeerManager {
             return Ok(());
         } else {
             eprintln!("Invalid protocol from new peer -> closing!");
-            return Err(AcceptError::NotAllowed { meta:  })
+            return Err(AcceptError::from_err(Error::other(
+                "New peer follows invalid protocol",
+            )));
         }
     }
 }
