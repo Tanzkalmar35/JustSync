@@ -1,6 +1,5 @@
 use anyhow::anyhow;
-use serde::Serialize;
-use tokio::{sync::mpsc, task::JoinError};
+use tokio::sync::mpsc;
 
 use iroh::{Endpoint, SecretKey, endpoint::presets, protocol::Router};
 
@@ -12,6 +11,7 @@ use crate::{
     },
 };
 
+mod peer;
 mod manager;
 
 const ALPN: &str = "justsync_v1";
@@ -27,6 +27,7 @@ pub(crate) struct IrohNetworkAdapter {
 #[async_trait::async_trait]
 impl NetworkAdapter for IrohNetworkAdapter {
     async fn start(
+        agent_id: String,
         core_tx: mpsc::Sender<NetworkToCoreMessage>,
         net_rx: mpsc::Receiver<CoreToNetworkMessage>,
     ) -> anyhow::Result<Self> {
@@ -36,7 +37,7 @@ impl NetworkAdapter for IrohNetworkAdapter {
             .bind()
             .await?;
 
-        let protocol_handler = IrohPeerManager::new();
+        let protocol_handler = IrohPeerManager::new(agent_id);
         let router = Router::builder(endpoint.clone())
             .accept(ALPN, protocol_handler)
             .spawn();

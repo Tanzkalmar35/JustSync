@@ -21,7 +21,7 @@ In the old version (not in the code anymore), I had a client and a relay crate. 
 
 ### 1. Define Network Adapter Interface
 
-- [ ] Establish concrete type for Iroh integration
+- [x] Establish concrete type for Iroh integration
   Create a dedicated struct to encapsulate the external network client and active session state.
 - [ ] Implement lifecycle management methods
   Define logic to initialize the connection, spawn the dispatch loop, and gracefully terminate resources.
@@ -93,4 +93,9 @@ Definition of done (checkable by another dev):
 
 ## Notes
 
+- 2026-11-23T23:59:42.314Z · I abstracted the recv and send methods as trait members, and let `IrohPeer` implement both. The traits are called `AsyncReader` and `AsyncSender`, and allow usage like: `peer.send(msg).await` or `peer.recv().await`
 - 2026-11-23T00:31:26.393Z · Discussion is outdated.
+
+## Attempts
+
+- 2026-11-24T00:01:55.841Z · How to handle the peer? If I in the case of self being the host wait for the new peer to send the full sync request, I could desync due to msgs coming through while transmission. Maybe remove full sync requests and send that automatically?
