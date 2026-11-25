@@ -40,6 +40,12 @@ In the old version (not in the code anymore), I had a client and a relay crate. 
 - [ ] Verify peer connection flow
   Confirm that a new peer can successfully use the generated token to join an existing session.
 
+### 4. Change extension interfaces accordingly
+
+- [ ] Intellij
+- [ ] VsCode
+- [ ] NeoVim
+
 ## Definition of done
 
 - [ ] The codebase compiles without errors in the continuous integration environment. — manual

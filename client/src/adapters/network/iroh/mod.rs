@@ -44,6 +44,8 @@ impl NetworkAdapter for IrohNetworkAdapter {
 
         endpoint.online().await;
 
+        endpoint.con
+
         Ok(Self {
             endpoint,
             router,

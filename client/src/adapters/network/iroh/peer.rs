@@ -1,10 +1,11 @@
 use anyhow::{Context, bail};
-use iroh::endpoint::{RecvStream, SendStream};
+use iroh::{EndpointAddr, endpoint::{RecvStream, SendStream}};
 
 use crate::adapters::network::protocol::{AsyncReceiver, AsyncSender};
 
 #[derive(Debug)]
 pub(in crate::adapters::network) struct IrohPeer {
+    pub(in crate::adapters::network) addr: EndpointAddr,
     pub(in crate::adapters::network) sender: SendStream,
     pub(in crate::adapters::network) receiver: RecvStream,
 }

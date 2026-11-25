@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
+use iroh::EndpointAddr;
 use serde::{Deserialize, Serialize};
 
 pub(crate) trait AsyncSender {
@@ -11,8 +14,14 @@ pub(crate) trait AsyncReceiver {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) enum SetupMessage {
-    /// Peer -> Host
+    /// Peer -> Peer/Host
     Id { agent_id: String },
+
+    /// Host -> New peer
+    SessionInformation {
+        host_agent_id: String,
+        peers: HashMap<String, EndpointAddr>,
+    },
 
     /// Host -> Peer
     FullSync { files: Vec<(String, Vec<u8>)> },
