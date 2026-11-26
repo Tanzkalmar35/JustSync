@@ -41,6 +41,7 @@ pub enum SessionRole {
 pub trait NetworkAdapter: Send {
     async fn start(
         agent_id: String,
+        is_host: bool,
         core_tx: mpsc::Sender<NetworkToCoreMessage>,
         net_rx: mpsc::Receiver<CoreToNetworkMessage>,
     ) -> anyhow::Result<impl NetworkAdapter>;

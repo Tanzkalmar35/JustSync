@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use anyhow::anyhow;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 
 use iroh::{Endpoint, SecretKey, endpoint::presets, protocol::Router};
 
@@ -11,8 +13,8 @@ use crate::{
     },
 };
 
-mod peer;
 mod manager;
+mod peer;
 
 const ALPN: &str = "justsync_v1";
 
@@ -20,14 +22,17 @@ pub(crate) struct IrohNetworkAdapter {
     endpoint: Endpoint,
     router: Router,
 
-    core_tx: mpsc::Sender<NetworkToCoreMessage>,
-    net_rx: mpsc::Receiver<CoreToNetworkMessage>,
+    core_tx: Arc<Mutex<mpsc::Sender<NetworkToCoreMessage>>>,
+    net_rx: Arc<Mutex<mpsc::Receiver<CoreToNetworkMessage>>>,
+
+    is_host: bool,
 }
 
 #[async_trait::async_trait]
 impl NetworkAdapter for IrohNetworkAdapter {
     async fn start(
         agent_id: String,
+        is_host: bool,
         core_tx: mpsc::Sender<NetworkToCoreMessage>,
         net_rx: mpsc::Receiver<CoreToNetworkMessage>,
     ) -> anyhow::Result<Self> {
@@ -37,20 +42,22 @@ impl NetworkAdapter for IrohNetworkAdapter {
             .bind()
             .await?;
 
-        let protocol_handler = IrohPeerManager::new(agent_id);
+        let shared_core_tx = Arc::new(Mutex::new(core_tx));
+        let shared_net_rx = Arc::new(Mutex::new(net_rx));
+
+        let protocol_handler = IrohPeerManager::new(endpoint.clone(), agent_id, is_host, shared_core_tx, shared_net_rx);
         let router = Router::builder(endpoint.clone())
             .accept(ALPN, protocol_handler)
             .spawn();
 
         endpoint.online().await;
 
-        endpoint.con
-
         Ok(Self {
             endpoint,
             router,
-            core_tx,
-            net_rx,
+            core_tx: shared_core_tx,
+            net_rx: shared_net_rx,
+            is_host,
         })
     }
 
